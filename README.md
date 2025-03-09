@@ -18,3 +18,6 @@ This project builds upon the work from [**OCTDL**](https://github.com/MikhailKul
 }
 
 To start, an attempt will be made to replicate their training, with future plans to modify, improve, or otherwise take a different approach.  Further modifications to the original implementation will be reflected in this repo.
+
+Additional Data Sources
+[OCT-5k](https://www.nature.com/articles/s41597-024-04259-z)
