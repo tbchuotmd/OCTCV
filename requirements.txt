@@ -1,0 +1,16 @@
+ipykernel == 6.29.5
+jupyterlab == 4.4.3
+keras == 3.10.0
+matplotlib == 3.9.2
+matplotlib-inline == 0.1.6
+notebook == 7.4.3
+numpy == 1.26.4
+opencv-python == 4.10.0.84
+pandas == 2.2.3
+requests == 2.32.4
+scikit-learn == 1.5.1
+tensorflow == 2.19.0
+mimetypes-magic == 0.4.30
+
+# NOTE: These are the versions used during development.
+# Other versions may work but are untested.
