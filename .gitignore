@@ -7,3 +7,4 @@ requirements_draft.txt
 *.docx
 icons/
 *.html
+.ipynb_checkpoints/
