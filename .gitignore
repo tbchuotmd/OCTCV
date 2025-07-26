@@ -1,3 +1,9 @@
 datasrc/.archivedDataSets/
 *.pdf
 *project_ideas*.*
+generateRequirements.py
+requirements_draft.txt
+.temp_requirements.txt
+*.docx#
+icons/
+*.html
