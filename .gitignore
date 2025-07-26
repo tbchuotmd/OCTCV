@@ -4,7 +4,7 @@ datasrc/.archivedDataSets/
 generateRequirements.py
 requirements_draft.txt
 .temp_requirements.txt
-*.docx
+*.docx#
 icons/
 *.html
 .ipynb_checkpoints/
