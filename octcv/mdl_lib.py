@@ -426,19 +426,20 @@ def plotConfusionMatrix(y_true,y_pred,
                 else:
                     # Normal confusion matrix cell styling
                     fontd = axtextFontdict
-                    text_color = color_dict['negative'] if i == 0 else color_dict['positive']
+                    text_color = color_dict['negative'] if j == 0 else color_dict['positive']
 
             else:
                 # Normal confusion matrix cell styling
                 fontd = axtextFontdict
-                text_color = color_dict['negative'] if i == 0 else color_dict['positive']
+                text_color = color_dict['negative'] if j == 0 else color_dict['positive']
 
-            ax.text(i,j,text,
+            ax.text(j,i,text,
                     ha='center',
                     va='center',
                     color=text_color,
                     fontdict=fontd
                     )
+            
     # Draw thin gridlines between all cells
     ax.set_xticks(np.arange(-0.5, cm.shape[1], 1), minor=True)
     ax.set_yticks(np.arange(-0.5, cm.shape[0], 1), minor=True)
@@ -891,7 +892,11 @@ class ModelEvaluator:
     
     def plotHistory(self,ax=None,figsize=(7.5,3),train_color='magenta',val_color='cyan'):
         if not self.saved_epoch_components:
-            saved_loss, saved_acc, saved_auc, saved_epoch = self.getSavedEpoch()
+            try:
+                saved_loss, saved_acc, saved_auc, saved_epoch = self.getSavedEpoch()
+            except RuntimeError as e:
+                print(e)
+                saved_auc, saved_epoch = None, None
         else:
             saved_loss, saved_acc, saved_auc, saved_epoch = self.saved_epoch_components   
 
