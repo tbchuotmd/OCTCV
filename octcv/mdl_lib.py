@@ -4,6 +4,9 @@ from octcv.arrViz import *
 import numpy as np
 import pandas as pd
 import re
+import glob
+import os
+import json
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
@@ -25,9 +28,21 @@ from keras import Model as kerasModel
 from keras.utils import plot_model
 from sklearn.metrics import roc_curve, roc_auc_score,confusion_matrix, ConfusionMatrixDisplay, classification_report
 from keras.callbacks import Callback
+from keras.src.callbacks.history import History
+from keras.models import load_model
 
 from IPython.display import display,clear_output
 import tensorflow as tf
+
+scriptPATH = os.path.realpath(__file__)
+scriptDIR = os.path.dirname(scriptPATH)
+projectDIR = os.path.dirname(scriptDIR)
+modelingDIR = os.path.join(projectDIR,'p5_Modeling')
+
+# def metabool(obj):
+#     return np.array(obj).any()
+    
+
 
 class LiveCapture(tf.keras.callbacks.Callback):
     def __init__(self, show_every='epoch'):
@@ -58,10 +73,14 @@ class XVolSet:
     def __init__(self,filepaths):
         self.filepaths = filepaths
         self.shape = filepaths.shape
+    def __getitem__(self,index):
+        filepaths = pd.DataFrame(self.filepaths.iloc[index]).T
+        return XVolSet(filepaths=filepaths)
     def load(self,normalized=True):
         image_paths = self.filepaths
         # shape: (N, 64, 128, 64)
         nrows,ncols = np.array(image_paths).shape
+
         if ncols == 2:
             if type(image_paths)==pd.DataFrame:
                 col_name = 'normalized_array' if normalized else [ c for c in image_paths.columns if c.startswith('display') ][0]
@@ -72,7 +91,7 @@ class XVolSet:
                 col_index = 0 if normalized else 1
                 xarrs = np.array([vizInputParser(path) for path in image_paths[:,col_index]]) # shape: (N, 64, 128, 64)
         elif ncols == 1:
-            xarrs = np.array([vizInputParser(path) for path in image_path])
+            xarrs = np.array([vizInputParser(path) for path in image_paths])
         xarrs = xarrs[...,np.newaxis] # add channel dim --> (N, 64, 128, 64, 1)
         return xarrs
 
@@ -293,7 +312,8 @@ class ModelVisualizer:
         ax.imshow(img)
         ax.set_title(f"Model Architecture: {self.model.name}\n")
 
-def plotConfusionMatrix(y_true,y_pred,
+def plotConfusionMatrix(y_true=None,y_pred=None,
+                        cm_array=None,
                         true_labels=None,
                         predict_labels='same',
                         ax=None, show_legend=True,
@@ -319,6 +339,8 @@ def plotConfusionMatrix(y_true,y_pred,
                         center_to_cm = False,
                         **kwargs):
     
+    # Parse class labels for display as tick labels in plot
+    # The prediction labels can either be the same (default) as the true labels or specified by the user
     def parse_labels(display_labels):
         # Ensure that display_labels is an iterable numpy array (ndim >= 1)     
         if not display_labels:
@@ -351,8 +373,17 @@ def plotConfusionMatrix(y_true,y_pred,
         predict_labels = true_labels
     else:
         predict_labels = parse_labels(predict_labels)
+    
+    # Parse data inputs - either directly inputting the confusion matrix as a numpy array or providing y_true and y_pred so that the confusion matrix can be calculated
 
-    cm = confusion_matrix(y_true,y_pred)
+    if np.array(cm_array).size >= 4:
+        cm = np.array(cm_array)
+    elif np.array(y_true).size > 0 and np.array(y_pred).size > 0:
+        cm = confusion_matrix(y_true,y_pred)
+    else:
+        raise ValueError(f"Must provide either:\n\t*[1] both `y_true` and `y_pred`\n\tor\n\t*[2] `cm_array` (size >= 4)\n\nReceived:\n\ty_true: {y_true}\n\ty_pred: {y_pred}\n\tcm_array: {cm_array}\n")
+    
+    # Create color mapping to distinguish true (values on the diagonal of the confusion matrix) and false predictions (all other values).  Colors assigned to true and false predictions can be changed in color_dict -- default is "#89CC75" (a light shade of green) for True (TP and TN in the case of a binary confusion matrix) and "#BE8686" (a light shade of red) for False (FP and FN in the case of a binary confusion matrix).
     color_matrix = np.zeros(cm.shape)
     color_matrix[np.diag_indices_from(color_matrix)] = 1
     cmap = ListedColormap([color_dict['false'],color_dict['true']])
@@ -360,22 +391,29 @@ def plotConfusionMatrix(y_true,y_pred,
     if not ax:
         _,ax = plt.subplots(1,1, figsize=(4,4))
 
+    # If sum_classes is True, the confusion matrix will include a row and column for the totals - i.e., an additional row at the bottom containing the sum of each column (totals for each predicted label) and an additional column to the right containing the sum of each row (totals for each true label), along with the grand total (total number of data points used to produce the confusion matrix - i.e., len(y_true)=len(y_pred), which should be the number of data points in the test/evaluation dataset ) in the bottom right corner.
     if sum_classes:
+        # Stack the additional row (totals for predicted labels) at the bottom of the original confusion matrix
         cm = np.vstack((cm,cm.sum(axis=0).reshape(1,-1)))
+        # Stack the additional column (totals for true labels) to the right of the original confusion matrix
         cm = np.hstack((cm,cm.sum(axis=1).reshape(-1,1)))
 
+        # Append the sum_label to the true_labels and predict_labels arrays
         true_labels = np.append(true_labels,sum_label)
         predict_labels = np.append(predict_labels,sum_label)
+
+        # Update the color matrix to match the new shape while preserving the color coding for true and false predictions (diagonal elements are true predictions, off-diagonal elements are false predictions).
         color_matrix = np.zeros(cm.shape)
         color_matrix[np.diag_indices_from(color_matrix)] = 1
 
+        # Distinguish the newly added row and column color from those of the actual confusion matrix
         color_matrix[-1,:] = 2
         color_matrix[:,-1] = 2
 
         cmap = ListedColormap([
-            color_dict['false'],
-            color_dict['true'],
-            '#f0f0f0'
+            color_dict['false'], # i.e., all 0's in color_matrix
+            color_dict['true'], # i.e., all 1's in color_matrix
+            '#f0f0f0' # i.e., all 2's in color_matrix
         ])
 
         # Horizontal line separating main matrix from totals row
@@ -408,6 +446,7 @@ def plotConfusionMatrix(y_true,y_pred,
     
     ax.imshow(color_matrix,cmap=cmap)
 
+    # Add text for the values of each cell of the confusion matrix
     n_classes = cm.shape[0]
     for i in range(n_classes):
         for j in range(n_classes):
@@ -477,15 +516,19 @@ def plotConfusionMatrix(y_true,y_pred,
         ax.yaxis.set_label_coords(-0.1, center_y)  # (x, y in axis coords)
 
     ax.tick_params(axis='both',which='both',length=0)
-    return ax
+    return ax,cm
 
 ### ======================================================================= ###
 ### =======================MODEL-EVALUATOR-CLASS=========================== ###
 ### ======================================================================= ###
 
 class ModelEvaluator:
-    def __init__(self, model, train_set, validation_set, test_set):
+    def __init__(self, model, train_set, validation_set, test_set, model_name=None):
         self.model = model
+
+        if model_name:
+            model.name = model_name
+
         self.modelName = model.name
 
         _,y_train,X_train = yX_split(train_set)
@@ -508,6 +551,9 @@ class ModelEvaluator:
             self.y_prob = model.predict(self.X_test.load(), verbose=0)
             self.threshold = self.optimalThreshold()
             self.y_pred = np.where(self.y_prob > self.threshold, 1, 0)
+            self.roc_data = self.generateROCData()
+            self.roc_auc = self.roc_data['auc']
+            self.classification_report = self.classificationReport()
         except:
             self.history = None
             self.epochs = None
@@ -515,6 +561,10 @@ class ModelEvaluator:
             self.y_prob = None
             self.threshold = None
             self.y_pred = None
+            self.roc_auc = None
+            self.roc_data = None
+            self.classification_report = None
+            self.metrics = None
         
         self.saved_epoch_components = None
         self.summary_figure = None
@@ -594,7 +644,11 @@ class ModelEvaluator:
                            type_ignore=[BatchNormalization,ReLU],
                            sizing_mode='balanced',
                            ax=None,
-                           figsize=(8,4)
+                           figsize=(8,4),
+                           save_to_file=False,
+                           output_path=None,
+                           output_filename=None,
+                           output_dir=None
                           ):
         '''Wrapper method for plotting model architecture as volumetric layers using using VisualKeras
         
@@ -630,6 +684,25 @@ class ModelEvaluator:
         ax.axis('off')
         ax.imshow(img)
         ax.set_title(f"Model Architecture: {model.name}\n")
+        if save_to_file:
+            if not (output_path or output_filename or output_dir):
+                raise ValueError("At least one of `output_path`, `output_filename`, or `output_dir` must be provided -- except if `output_path` is provided, both `output_filename` and `output_dir` must be None (i.e., exactly one argument must be provided).")
+            if output_path and not (output_filename or output_dir):
+                oPATH = output_path
+            elif output_filename and not (output_path or output_dir):
+                oDIR = os.path.join(modelingDIR, 'models', self.model.name)
+                os.makedirs(oDIR,exist_ok=True)
+                oNAME = output_filename
+                oPATH = os.path.join(oDIR,oNAME)
+            elif output_dir and not (output_path or output_filename):
+                oDIR = output_dir
+                os.makedirs(oDIR,exist_ok=True)
+                oNAME = f"{model.name}_VK-architecture.png"
+                oPATH = os.path.join(oDIR,oNAME)
+            else:
+                raise ValueError("Ambiguous path for saving image; if `output_path` is provided, both `output_filename` and `output_dir` must be None.") 
+            plt.savefig(oPATH)
+            print(f"\nSaved image to: \033[32m{os.path.relpath(oPATH)}\033[0m\n")
         
     def train(self, model=None,
               monitor='val_auc',
@@ -687,7 +760,7 @@ class ModelEvaluator:
         print(f"{'='*len(header_text)}\n{header_text}\n{'='*len(header_text)}")
 
         start = datetime.now()
-        print(f"\n\033[32;1mBEGIN:\033[0m \033[100m{start.strftime('%Y-%m-%d %H:%M:%S')}\033[0m\n")
+        print(f"\n\033[32;1mBEGIN:\033[0m \033[100;97m{start.strftime('%Y-%m-%d %H:%M:%S')}\033[0m\n")
         print('━'*50,'\n')
         
         early_stop = EarlyStopping(
@@ -723,10 +796,10 @@ class ModelEvaluator:
 
         end = datetime.now()
         print('━'*50)
-        print(f"\n\033[31;1mEND:\033[0m \033[100m{end.strftime('%Y-%m-%d %H:%M:%S')}\033[0m")
+        print(f"\n\033[31;1mEND:\033[0m \033[100;97m{end.strftime('%Y-%m-%d %H:%M:%S')}\033[0m")
         print('\n','-'*30)
         duration = end - start
-        print(f"\033[33;1mELAPSED TIME:\033[0m \033[100m{duration}\033[0m\n")
+        print(f"\033[33;1mELAPSED TIME:\033[0m \033[100;97m{duration}\033[0m\n")
         self.training_time = {
             'start': start,
             'end': end,
@@ -809,6 +882,7 @@ class ModelEvaluator:
                sum_label='Total',
                center_to_cm=True,
                show_legend=False,
+               save_to_file=False
                ):
         if self.history is None:
             raise RuntimeError("No history -- run train() first.")
@@ -816,7 +890,8 @@ class ModelEvaluator:
             self.predict()
 
         if method == 'custom':
-            ax=plotConfusionMatrix(self.y_true,self.y_pred,
+            ax,cm = plotConfusionMatrix(self.y_true,
+                                        self.y_pred,
                     title=title,
                     true_labels=['Normal','Glaucoma'],
                     predict_labels='n2w',
@@ -829,7 +904,9 @@ class ModelEvaluator:
                    )
         
         elif method == 'sklearn':
-            cm = confusion_matrix(self.y_true,self.y_pred,labels=[0,1])
+            selfcmarr = np.array(self.confusion_matrix)
+            if not selfcmarr.any() or selfcmarr.size < 4:
+                cm = confusion_matrix(self.y_true,self.y_pred,labels=[0,1])
             disp = ConfusionMatrixDisplay(
                 confusion_matrix=cm, 
                 display_labels=['Normal','Glaucoma']
@@ -841,25 +918,60 @@ class ModelEvaluator:
                             colorbar=True,
                             ax=ax)
             ax.set_title(f"Confusion Matrix")
-            return cm_plot
-    
-    def classificationReport(self,output_df=True,intro_text=None):
-        if self.history is None:
-            raise RuntimeError("No history -- run train() first.")
-        if self.y_pred is None:
-            self.predict()
-        if intro_text:
-            # print('-'*len(intro_text))
-            print(f"\033[4m{intro_text}\033[0m")
-        if output_df:
-            cr = classification_report(self.y_true, self.y_pred, output_dict=True)
-            df = pd.DataFrame(cr).T
-            display(df)
-            return df
-        else:
-            cr = classification_report(self.y_true, self.y_pred)
-            print(cr)
 
+        self.confusion_matrix = cm
+            
+        if save_to_file:
+            if isinstance(save_to_file, str):
+                savePATH = save_to_file
+            else:
+                savePATH = os.path.join(modelingDIR, 'models', self.model.name, f"{self.model.name}_confusion_matrix.png")
+            saveDIR = os.path.dirname(savePATH)
+            os.makedirs(saveDIR, exist_ok=True)
+            plt.savefig(savePATH)
+    
+    def classificationReport(self,
+                             display_format='df',
+                             intro_text=None,
+                             save_to_file=False
+                             ):
+        if not self.classification_report:
+
+            if self.history is None:
+                raise RuntimeError("No history -- run train() first.")
+            if self.y_pred is None:
+                self.predict()
+            if intro_text:
+                # print('-'*len(intro_text))
+                print(f"\033[4m{intro_text}\033[0m")
+
+            cr = classification_report(self.y_true, self.y_pred, output_dict=True)
+            self.classification_report = {'dict':cr}
+            cr = pd.DataFrame(cr).T
+            self.classification_report['df'] = cr        
+            cr = classification_report(self.y_true, self.y_pred)
+            self.classification_report['text'] = cr
+
+        if save_to_file:
+            if isinstance(save_to_file, str):
+                savePATH = save_to_file
+            else:
+                savePATH = os.path.join(modelingDIR, 'models', self.model.name, f"{self.model.name}_classification_report.csv")
+            
+            saveDIR = os.path.dirname(savePATH)
+            os.makedirs(saveDIR, exist_ok=True)
+
+            self.classification_report['df'].to_csv(savePATH, index=False)
+
+        if display_format == 'df':
+            display(self.classification_report['df'])
+        elif display_format == 'text':
+            print(self.classification_report['text'])
+        elif display_format == 'dict':
+            print(self.classification_report['dict'])
+
+        return self.classification_report
+            
     def getSavedEpoch(self):
         if self.training_history is None:
             raise RuntimeError("No history -- run train() first.")
@@ -882,20 +994,22 @@ class ModelEvaluator:
                 break
         if not saved_epoch:
             if len(matched_epochs) > 1:
-                raise RuntimeError(f"Multiple epochs have the same val_auc value: {matched_epochs}")
+                raise RuntimeError(f"Multiple epochs have the same val_auc value: {matched_epochs} -- selecting epoch {matched_epochs[-1]}")
             else:
                 raise RuntimeError("No epochs have the same val_auc value")
-        
+
         self.saved_epoch_components = saved_epoch, saved_loss, saved_acc, saved_auc
         
         return saved_loss, saved_acc, saved_auc, saved_epoch
     
-    def plotHistory(self,ax=None,figsize=(7.5,3),train_color='magenta',val_color='cyan'):
+    def plotHistory(self,ax=None,figsize=(7.5,3),
+                    train_color='magenta',val_color='cyan',
+                    save_to_file=False
+                    ):
         if not self.saved_epoch_components:
             try:
                 saved_loss, saved_acc, saved_auc, saved_epoch = self.getSavedEpoch()
-            except RuntimeError as e:
-                print(e)
+            except Exception as e:
                 saved_auc, saved_epoch = None, None
         else:
             saved_loss, saved_acc, saved_auc, saved_epoch = self.saved_epoch_components   
@@ -907,18 +1021,32 @@ class ModelEvaluator:
         ax.plot(self.training_history['auc'], label='train AUC', marker='.', color=train_color)
         ax.set_xlabel('Epoch')
         ax.set_ylabel('AUC')
-        ax.axvline(saved_epoch, linestyle='--', c='r', label='Saved Epoch')
-        all_auc = self.training_history['auc'] + self.training_history['val_auc']
-        all_auc = np.array(all_auc)
-        midxax = all_auc.min() + ((all_auc.max() - all_auc.min()) / 2)
-        ax.text(saved_epoch+.2, midxax, f"val:    {saved_auc:.4f}\ntrain:  {self.training_history['auc'][saved_epoch]:.4f}")
+
+        if saved_epoch:
+            ax.axvline(saved_epoch, linestyle='--', c='r', label='Saved Epoch')
+            all_auc = self.training_history['auc'] + self.training_history['val_auc']
+            all_auc = np.array(all_auc)
+            midxax = all_auc.min() + ((all_auc.max() - all_auc.min()) / 2)
+            ax.text(saved_epoch+.2, midxax, f"val:    {saved_auc:.4f}\ntrain:  {self.training_history['auc'][saved_epoch]:.4f}")
         ax.legend()
+
         ax.set_title('AUC over Epochs')
-        plt.tight_layout()
+
+        if save_to_file:
+            if isinstance(save_to_file, str):
+                savePATH = save_to_file
+            else:
+                savePATH = os.path.join(modelingDIR, 'models',  self.model.name, f"{self.model.name}_history.png")
+            saveDIR = os.path.dirname(savePATH)
+            os.makedirs(saveDIR, exist_ok=True)
+            plt.savefig(savePATH)
 
         return fig,ax
     
-    def plotROC(self,ax=None,use_test_set=False,figsize=(8,6)):
+    def generateROCData(self,
+                        use_test_set=False,
+                        save_to_file=False
+                        ):
         if use_test_set:
             X = self.X_test
             y = self.y_true
@@ -926,23 +1054,59 @@ class ModelEvaluator:
             X = self.X_valid
             y = self.y_valid
         
-        self.y_prob = self.model.predict(X.load(), verbose=0)
+        if np.array(self.y_prob).any():
+            self.y_prob = self.model.predict(X.load(), verbose=0)
 
         roc_auc = roc_auc_score(y, self.y_prob)
-        fpr, tpr, _ = roc_curve(y, self.y_prob)
+        fpr, tpr, thresholds = roc_curve(y, self.y_prob)
+        roc_data = {
+            'auc':roc_auc,
+            'data': {
+                'fpr':fpr,
+                'tpr':tpr,
+                'thresholds':thresholds
+                }
+        }
         
+        self.roc_data = roc_data
+
+        if save_to_file:
+            if isinstance(save_to_file, str):
+                savePATH = save_to_file
+            else:
+                savePATH = os.path.join(modelingDIR, 'models',self.model.name, f"{self.model.name}_roc_data.json")
+            saveDIR = os.path.dirname(savePATH)
+            os.makedirs(saveDIR, exist_ok=True)
+            with open(savePATH,'w') as f:
+                json.dump(roc_data,f)
+
+        return roc_data
+    
+    def plotROC(self,ax=None,
+                use_test_set=False,
+                figsize=(8,6),
+                save_to_file=False
+                ):
+        
+        if not self.roc_data:
+            roc_data = self.generateROCData(use_test_set=use_test_set)
+            self.roc_data = roc_data
+        else:
+            roc_data = self.roc_data
+
+        fpr = roc_data['data']['fpr']
+        tpr = roc_data['data']['tpr']
+        roc_auc = roc_data['auc']
+        self.roc_auc = roc_auc
+
         if self.threshold is None:
             self.threshold = self.optimalThreshold()
 
         if self.y_pred is None:
             self.y_pred = np.where(self.y_prob > self.threshold, 1, 0)
 
-        self.roc_auc = roc_auc
-
         if not ax:
-            fig,ax = plt.subplots(1,1, figsize=figsize)
-
-
+            _,ax = plt.subplots(1,1, figsize=figsize)
 
         ax.plot(fpr, tpr, color='darkorange', lw=2, label='ROC curve (area = %0.2f)' % self.roc_auc)
         ax.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
@@ -971,12 +1135,36 @@ class ModelEvaluator:
                                 }
                 )
 
-    def summary_plots(self):
-        self.plotHistory()
+        if save_to_file:
+            if isinstance(save_to_file, str):
+                savePATH = save_to_file
+            else:
+                savePATH = os.path.join(modelingDIR, 'models', self.model.name, f"{self.model.name}_ROC.png")
+            saveDIR = os.path.dirname(savePATH)
+            os.makedirs(saveDIR, exist_ok=True)
+            plt.savefig(savePATH)
+
+        return ax
+
+    def summary_plots(self,save_to_file=False,save_individual_plots=False):
+        self.plotHistory(save_to_file=save_individual_plots)
+
         fig,(l,r)=plt.subplots(1,2,figsize=(8,3))
-        self.plotCM(ax=l,figsize=(4,4))
-        self.plotROC(ax=r,figsize=(4,4))
+
+        self.plotCM(ax=l,figsize=(4,4),
+                    save_to_file=save_individual_plots)
+        
+        self.plotROC(ax=r,figsize=(4,4),
+                     save_to_file=save_individual_plots)
+        
         self.summary_figure = fig
+
+        if save_to_file:
+            if isinstance(save_to_file, str):
+                savePATH = save_to_file
+            else:
+                savePATH = os.path.join(modelingDIR, self.model.name, f"{self.model.name}_summary-plots.png")
+            plt.savefig(savePATH)
 
     def strTimeDelta(self,duration:timedelta = None,delimiter=None,unitvers=0):
 
@@ -1034,7 +1222,13 @@ class ModelEvaluator:
             result = re.sub(delimiter+r"(\d+$)", '.'+r'\1', result)
         return result
     
-    def evaluate(self):
+    def evaluate(self,
+                 save_performance_metrics=False,
+                 savePATH=None,
+                 saveDIR=None,
+                 saveFILENAME=None,
+                 verbose=0
+                 ):
         if self.history is None:
             raise RuntimeError("No history -- run train() first.")
         if self.y_prob is None:
@@ -1046,10 +1240,31 @@ class ModelEvaluator:
 
         header_text = f"Evaluating model: {self.model.name}"
         print(f"{'='*len(header_text)}\n{header_text}\n{'='*len(header_text)}")
-        time_text = f"Training Time: \033[100m{self.strTimeDelta(unitvers=3,delimiter=', ')}\033[0m"
+        time_text = f"Training Time: \033[100;97m{self.strTimeDelta(unitvers=3,delimiter=', ')}\033[0m"
         print(f"\n{time_text}\n{'-'*(len(time_text)+3)}\n")
         self.summary_plots()
         self.classificationReport(intro_text="Classification Report")
+
+        if save_performance_metrics:
+            if savePATH and not (saveDIR or saveFILENAME):
+                saveDIR = os.path.dirname(savePATH)
+                saveFILENAME = os.path.basename(savePATH)
+            elif saveFILENAME and not (saveDIR or savePATH):
+                saveDIR = os.path.join(modelingDIR, self.model.name)
+            elif saveDIR and not (saveFILENAME or savePATH):
+                saveFILENAME = f"{self.model.name}_metrics.json"
+            elif saveDIR and saveFILENAME:
+                pass
+            elif savePATH and not (saveDIR and saveFILENAME):
+                raise ValueError("Path for saving performance metrics is ambiguous -- if savePATH is provided, leave both saveDIR and saveFILENAME as None.")
+            else:
+                saveDIR = os.path.join(modelingDIR,'models', self.model.name)
+                os.makedirs(saveDIR, exist_ok=True)
+                saveFILENAME = f"{self.model.name}_metrics.json"
+            self.savePerformanceMetrics(filename=saveFILENAME,basepath=saveDIR)
+            if int(verbose) > 0:
+                savePATH = os.path.join(saveDIR,saveFILENAME)
+                print(f"\nPerformance metrics saved to: {os.path.relpath(savePATH)}\n")
 
     def train_and_evaluate(self,
                            monitor='val_auc',
@@ -1069,6 +1284,10 @@ class ModelEvaluator:
                            vk_type_ignore=[BatchNormalization,ReLU],
                            vk_sizing_mode='balanced',
                            vk_figsize=(8,4),
+                           save_performance_metrics=False,
+                           savePATH=None,
+                           saveDIR=None,
+                           saveFILENAME=None,
                            **kwargs):
                            
         if show_architecture:
@@ -1081,23 +1300,161 @@ class ModelEvaluator:
                 figsize=vk_figsize
                 )
         
-        self.train(
-            monitor=monitor,
-            patience=patience,
-            restore_best_weights=restore_best_weights,
-            optimizer_function = optimizer_function,
-            learning_rate = learning_rate,
-            loss_function=loss_function,
-            metrics=metrics,
-            num_epochs=num_epochs,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            verbose=verbose,
-            **kwargs
-        )
+        complete = False
+        j=0
+        while not complete:
+            try:
+                self.train(
+                    monitor=monitor,
+                    patience=patience,
+                    restore_best_weights=restore_best_weights,
+                    optimizer_function = optimizer_function,
+                    learning_rate = learning_rate,
+                    loss_function=loss_function,
+                    metrics=metrics,
+                    num_epochs=num_epochs,
+                    batch_size=batch_size,
+                    shuffle=shuffle,
+                    verbose=verbose,
+                    **kwargs
+                )
+                
+                self.evaluate(
+                    save_performance_metrics=save_performance_metrics,
+                    savePATH=savePATH,
+                    saveDIR=saveDIR,
+                    saveFILENAME=saveFILENAME,
+                    verbose=verbose
+                )
+                complete = True
+            except KeyboardInterrupt:
+                break
+            except:
+                complete = False
+            j += 1
+            if j > 10:
+                break
+
+    def generatePerformanceMetrics(self):
+            if self.history is None:
+                raise RuntimeError("No history -- run train() first.")
+            if self.training_history is None:
+                self.training_history = self.history.history
+            if self.y_true is None:
+                _,y_eval,X_eval = yX_split(self.test_set)
+                self.y_true = y_eval
+            if self.y_pred is None:
+                self.y_pred = self.predict()
+            if self.confusion_matrix is None:
+                self.confusion_matrix = confusion_matrix(self.y_true, self.y_pred)
+            if self.roc_data is None:
+                self.roc_data = self.generateROCData()
+            if self.classification_report is None:
+                self.classification_report = self.classificationReport(display_format=None)
+
+            training_datetimes = self.training_time
+            training_seconds = {}
+            for k,v in training_datetimes.items():
+                if isinstance(v,timedelta):
+                    training_seconds[k] = v.total_seconds()
+                elif isinstance(v,datetime):
+                    training_seconds[k] = v.timestamp()
+
+            metrics = {
+                'name': self.model.name,
+                'n_params': self.model.count_params(),
+                'n_layers': len(self.model.layers),
+                'time': training_seconds,
+                'history': self.training_history,
+                'cm': self.confusion_matrix.tolist(),
+                'threshold' : self.threshold,
+                'roc' : self.roc_data,
+                'report' : self.classification_report['dict']
+            }
+            self.metrics = metrics
+            return metrics
+
+    def savePerformanceMetrics(self, filename=None,basepath=None):
+        if not self.metrics:
+            metrics = self.generatePerformanceMetrics()
+        else:
+            metrics = self.metrics
+            
+        metrics = makeJSONserializable(metrics)
+
+        if not filename:
+            filename = f"{self.model.name}_metrics.json"
+        if not basepath:
+            basepath = os.path.join(modelingDIR, 'models', self.model.name)
+
+        os.makedirs(basepath, exist_ok=True)
+        filePATH = os.path.join(basepath, filename)
+        with open(filePATH, 'w') as f:
+            json.dump(metrics, f)
+
+    # def save(self):
+    #     if self.history is None:
+    #         raise RuntimeError("No history -- run train() first.")
         
-        self.evaluate()
+    #     basedir = './models'
+    #     mdldir = os.path.join(basedir, self.model.name)
+    #     os.makedirs(mdldir, exist_ok=True)
 
+    #     wtpath = os.path.join(mdldir, f"{self.model.name}.h5")
+    #     archpath = os.path.join(mdldir, f"{self.model.name}.json")
+    #     hist
+    #     filename = os.path.join(wtdir, f"{self.model.name}.h5")
+    #     self.model.save(filename)
+    #     print(f"Model saved to: {filename}")
 
+    # def load(self,basepath):
+    #     mdlpath = glob.glob(os.path.join(basepath, '*.keras'))[0]
+    #     self.model = load_model(mdlpath)
+
+    #     histpath = glob.glob(os.path.join(basepath, '*_history.csv'))[0]
+    #     histdf = pd.read_csv(histpath)
+    #     self.training_history{ k:list(v) for k,v in dict(histdf).items() }
+    #     self.model.history = History()
+    #     self.model.history.history = self.training_history
+    #     self.history = self.model.history
+
+    #     print(f"Model loaded from: {mdlpath}")
+    #     print(f"History loaded from: {histpath}")
+
+   
+def convert_float32_to_float(data):
+    """
+    Recursively converts all numpy.float32 values in a nested dictionary
+    or list to standard Python floats.
+    """
+    if isinstance(data, dict):
+        return {k: convert_float32_to_float(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [convert_float32_to_float(elem) for elem in data]
+    elif isinstance(data, np.float32):
+        return float(data)
+    else:
+        return data
+    
+def convert_numpyarray_to_list(data):
+    if isinstance(data, dict):
+        return {k: convert_numpyarray_to_list(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [convert_numpyarray_to_list(elem) for elem in data]
+    elif isinstance(data, np.ndarray):
+        return data.tolist()
+    else:
+        return data
+    
+def makeJSONserializable(data):
+    data = convert_numpyarray_to_list(data)
+    data = convert_float32_to_float(data)
+    return data
+
+# class ModelComparison:
+#     def __init__(self, model_names: list):
+#         self.models = model_names
+#         for model in self.models:
+#             if os.path.
 
     
