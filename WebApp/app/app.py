@@ -63,26 +63,34 @@ async def predict(file: UploadFile = File(...)):
 
 # --- Gradio Wrapper Logic ---
 async def gradio_wrapper(file_obj, progress=gr.Progress()):
-    """
-    This bridges Gradio's file handling with your existing 
-    FastAPI logic to avoid code duplication.
-    """
     if file_obj is None:
-        return None, None, None, None
-        
+        return None, None, None, None, None
+
     progress(0.2, desc="Loading data...")
-    # Convert Gradio file to FastAPI-style UploadFile
+
+    # Load volume for UI
+    volume = np.load(file_obj.name)
+
     with open(file_obj.name, "rb") as f:
-        # Create a mock UploadFile to reuse your logic
         from starlette.datastructures import UploadFile as StarletteUploadFile
-        mock_file = StarletteUploadFile(filename=os.path.basename(file_obj.name), file=f)
-        
+        mock_file = StarletteUploadFile(
+            filename=os.path.basename(file_obj.name),
+            file=f
+        )
+
         progress(0.5, desc="Analyzing OCT Scan...")
-        # Call your existing function directly
         result = await predict(mock_file)
-        
+
     progress(1.0, desc="Complete")
-    return result["filename"], result["probability"], result["prediction"], result["threshold_used"]
+
+    return (
+        result["filename"],
+        result["probability"],
+        result["prediction"],
+        result["threshold_used"],
+        volume            
+    )
+
 
 # Mount the UI
 glaucoma_ui = create_ui(gradio_wrapper)
