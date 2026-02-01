@@ -6,6 +6,182 @@ import numpy as np
 import matplotlib.pyplot as plt
 import magic
 import cv2
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+class volumeViewer:
+    def __init__(self, 
+                 volume_data:np.ndarray = np.random.randint(0,255,(9,9,9)) 
+                ):
+        
+        if volume_data.ndim not in [3,4]:
+            raise ValueError(f"Provided volume_data has ndim = {volume_data.ndim}.  Data must have ndim of either 3 (grayscale) or 4 (color).")
+            
+        self.data = volume_data
+        
+    def sliceViewer(self, data=None, axis=0):
+        # 1. Create the base figure
+        fig = go.Figure()
+    
+        # 2. Parse Logic for Axis
+        match axis:
+            case 0:
+                zdata = lambda data,i : data[i,:,:]
+            case 1:
+                zdata = lambda data,i : data[:,i,:]
+            case 2:
+                zdata = lambda data,i : data[:,:,i]
+            case _:
+                raise ValueError('Invalid axis provided.')
+    
+        axdimmap = {
+            0 : data[0,:,:].shape,
+            1 : data[:,0,:].shape,
+            2 : data[:,:,0].shape
+        }
+        
+        # 3. Add each slice as a 'trace' (initially all hidden except the first)
+        for i in range(data.shape[axis]):
+          
+            fig.add_trace(
+                go.Heatmap(
+                    visible=False,
+                    z=zdata(data,i),
+                    colorscale='Viridis',
+                    showscale=False
+                )
+            )
+        
+        # Make the first trace visible
+        fig.data[0].visible = True
+        
+        # 4. Create the slider steps
+        steps = []
+        for i in range(len(fig.data)):
+            step = dict(
+                method="update",
+                args=[{"visible": [False] * len(fig.data)},
+                      {"title": f"Slice: {i}"}], 
+                label=str(i)
+            )
+            step["args"][0]["visible"][i] = True  # Make only the current selection visible
+            steps.append(step)
+        
+        # 5. Add slider to layout
+        sliders = [dict(
+            active=32,
+            currentvalue={"prefix": f"Axis {axis} Index: "},
+            pad={"t": 50},
+            steps=steps
+        )]
+    
+        f=8
+        h,w = axdimmap[axis]
+        H,W = (np.array([h,w])*f).astype(int)
+        print(W,H)
+        
+        fig.update_layout(
+            sliders=sliders,
+            width=W,
+            height=H,
+            yaxis=dict(autorange='reversed') # Matches standard image orientation
+        )
+        
+        fig.show()
+
+    def orthoSlicesViewer(self,data=None):
+        
+        if data is None:
+            data = self.data
+            
+        d0, d1, d2 = data.shape
+        
+        # 1. Aspect Ratio Handling (Scale factor f=4 for visibility)
+        f = 4
+        # Subplot widths are proportional to the 'horizontal' dimension of the slice
+        column_widths = [d2, d2, d1] 
+        
+        fig = make_subplots(
+            rows=1, cols=3, 
+            subplot_titles=("Sagittal (Ax 0)", "Coronal (Ax 1)", "Axial (Ax 2)"),
+            column_widths=column_widths,
+            horizontal_spacing=0.05
+        )
+    
+        # Track trace start indices
+        offsets = [0, d0, d0 + d1]
+    
+        # 2. Add Heatmap Traces
+        for i in range(d0):
+            fig.add_trace(go.Heatmap(z=data[i,:,:], visible=(i==0), colorscale='Viridis', showscale=False), row=1, col=1)
+        for i in range(d1):
+            fig.add_trace(go.Heatmap(z=data[:,i,:], visible=(i==0), colorscale='Viridis', showscale=False), row=1, col=2)
+        for i in range(d2):
+            fig.add_trace(go.Heatmap(z=data[:,:,i], visible=(i==0), colorscale='Viridis', showscale=False), row=1, col=3)
+    
+        # 3. Initialize Crosshair Shapes
+        # Use a dictionary for the line sub-properties
+        line_props = dict(color="red", width=5, dash="dot")
+        
+        # Placeholder lines at index 0
+        # Shapes are added in order: 0,1 (Plot 1) | 2,3 (Plot 2) | 4,5 (Plot 3)
+        for col, x_max, y_max in [(1, d2, d1), (2, d2, d0), (3, d1, d0)]:
+            # Horizontal Line
+            line_props['color']='yellow'
+            fig.add_shape(type="line", x0=0, x1=x_max, y0=0, y1=0, 
+                          xref=f"x{col}", yref=f"y{col}", line=line_props) 
+            # Vertical Line
+            line_props['color']='magenta'
+            fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=y_max, 
+                          xref=f"x{col}", yref=f"y{col}", line=line_props)
+    
+        def create_steps(ax_idx):
+            steps = []
+            n_slices = data.shape[ax_idx]
+            total_traces = d0 + d1 + d2
+            
+            for i in range(n_slices):
+                # (2) Don't reset other subplots: Use 'None' for indices not in this axis
+                visibility = [None] * total_traces
+                for j in range(n_slices):
+                    visibility[offsets[ax_idx] + j] = (i == j)
+                
+                # (3) Crosshair Logic
+                # Shapes are indexed 0-5. 
+                # If we move Axis 0: Update H-line of Plot 2 and H-line of Plot 3
+                shape_updates = {}
+                if ax_idx == 0:
+                    shape_updates.update({"shapes[2].y0": i, "shapes[2].y1": i, "shapes[4].y0": i, "shapes[4].y1": i})
+                elif ax_idx == 1:
+                    shape_updates.update({"shapes[0].y0": i, "shapes[0].y1": i, "shapes[5].x0": i, "shapes[5].x1": i})
+                elif ax_idx == 2:
+                    shape_updates.update({"shapes[1].x0": i, "shapes[1].x1": i, "shapes[3].x0": i, "shapes[3].x1": i})
+    
+                steps.append(dict(
+                    method="update",
+                    args=[{"visible": visibility}, shape_updates],
+                    label=str(i)
+                ))
+            return steps
+    
+        # 4. Sliders and Layout
+        fig.update_layout(
+            sliders=[
+                dict(active=0, steps=create_steps(0), len=0.3, x=0, currentvalue={"prefix": "Ax0: "}),
+                dict(active=0, steps=create_steps(1), len=0.3, x=0.35, currentvalue={"prefix": "Ax1: "}),
+                dict(active=0, steps=create_steps(2), len=0.3, x=0.7, currentvalue={"prefix": "Ax2: "})
+            ],
+            height=max(d1, d0) * f + 150, # Dynamic height based on data
+            width=sum(column_widths) * f,
+            margin=dict(l=20, r=20, t=50, b=100)
+        )
+        
+        # Reverse Y-axes for image convention
+        fig.update_yaxes(autorange="reversed")
+        fig.show()
+
+
+#---------------------------------------------------------------------------------------------------------
 
 class GridDimensionOptimizer:
     def __init__(self):
@@ -399,7 +575,7 @@ def tickIntervalCalc(max_value,denom,spacing_tier=2):
         return result * 2
 
 
-def plotCrossSection(filepath, axis_norm=1,slice_depth=0.5, figsize=(6,5), ax=None):
+def plotCrossSection(filepath, axis_norm=1,slice_depth=0.5, figsize=(6,5), title=None, ax=None, show_image_stats=True):
     
     dimClass = arrayDimParser(pathToArray(filepath))
 
@@ -418,7 +594,8 @@ def plotCrossSection(filepath, axis_norm=1,slice_depth=0.5, figsize=(6,5), ax=No
 
     # Plot cross section
     filename = os.path.basename(filepath)
-    title = f"{os.path.splitext(filename)[0]}\n"
+    if title is None:
+        title = f"{os.path.splitext(filename)[0]}\n"
 
     if not ax:
         _,ax = plt.subplots(1,1,figsize=figsize)
@@ -448,38 +625,52 @@ def plotCrossSection(filepath, axis_norm=1,slice_depth=0.5, figsize=(6,5), ax=No
 
     mx = 1.07
     
-    if dimClass.startswith('3D'):
-        ax.text(mx,.90,f'Slice Index', 
-                transform=ax.transAxes, 
-                fontsize=10, fontweight='bold')
-    
-        ax.text(mx,.85,f'{slice_index} of {d}', 
-                transform=ax.transAxes,
-                fontsize=12)
-        
-        ax.text(mx,.50,f'Normal Axis', 
-                transform=ax.transAxes, 
-                fontsize=10, fontweight='bold')
-    
-        ax.text(mx,.45,f'ndarray axis = {axis_norm}', 
-                transform=ax.transAxes,
-                fontsize=12)
-        
-        ax.text(mx,.30,f'Slice Depth', 
-                transform=ax.transAxes, 
-                fontsize=10, fontweight='bold')
-    
-        ax.text(mx,.25,f'{slice_depth}', 
-                transform=ax.transAxes,
-                fontsize=12)
-        
-    ax.text(mx,.70,f'Image\nDimensions', 
-            transform=ax.transAxes, 
-            fontsize=10, fontweight='bold')
-    
-    ax.text(mx,.65,f'{w} x {h} px', 
-            transform=ax.transAxes,
-            fontsize=12)
+    if type(show_image_stats) == bool:
+        if not show_image_stats:
+            return ax
+        else:
+            show_image_stats = ['slice_index','axis_norm','slice_depth','image_dims']
+
+    if type(show_image_stats) == list:
+        if dimClass.startswith('3D'):
+            if 'slice_index' in show_image_stats:
+                ax.text(mx,.90,f'Slice Index', 
+                        transform=ax.transAxes, 
+                        fontsize=10, fontweight='bold')
+            
+                ax.text(mx,.85,f'{slice_index} of {d}', 
+                        transform=ax.transAxes,
+                        fontsize=12)
+                
+            if 'axis_norm' in show_image_stats:
+                ax.text(mx,.50,f'Normal Axis', 
+                        transform=ax.transAxes, 
+                        fontsize=10, fontweight='bold')
+            
+                ax.text(mx,.45,f'ndarray axis = {axis_norm}', 
+                        transform=ax.transAxes,
+                        fontsize=12)
+                
+            if 'slice_depth' in show_image_stats:
+                ax.text(mx,.30,f'Slice Depth', 
+                        transform=ax.transAxes, 
+                        fontsize=10, fontweight='bold')
+            
+                ax.text(mx,.25,f'{slice_depth}', 
+                        transform=ax.transAxes,
+                        fontsize=12)
+            
+        if 'image_dims' in show_image_stats:
+            ax.text(mx,.70,f'Image\nDimensions', 
+                    transform=ax.transAxes, 
+                    fontsize=10, fontweight='bold')
+            
+            ax.text(mx,.60,f'{w} x {h} px', 
+                    transform=ax.transAxes,
+                    fontsize=12)
+
+    else:
+        raise ValueError('show_image_stats must be a boolean or list of strings')
     
     return ax
 
@@ -487,6 +678,52 @@ def plotCrossSection(filepath, axis_norm=1,slice_depth=0.5, figsize=(6,5), ax=No
 def viewCrossSection(filepath, axis_norm=1,slice_depth=0.5, figsize=(6,5), ax=None):
     pltax = plotCrossSection(filepath,axis_norm,slice_depth,figsize,ax)
     plt.show()
+
+def plot_from_df(df, dfRowIndices, filepath_colname='filepath', 
+                 axis_norm=1,slice_depth=0.5, 
+                 figsize=(12,12), figdims:tuple=None,
+                 show_image_stats=False,
+                 title_features=None, title=None):
+    
+    if figdims:
+        if len(figdims) == 2:
+            total = len(dfRowIndices)
+            if figdims[0] and figdims[1]:
+                nrows,ncols = figdims
+            elif figdims[0]:
+                nrows = figdims[0]
+                ncols = int(np.ceil(total/nrows))
+            elif figdims[1]:
+                ncols = figdims[1]
+                nrows = int(np.ceil(total/ncols))
+            else:
+                raise ValueError("at least one of figdims[0] and figdims[1] must be specified.")
+        else:
+            raise ValueError("figdims must be a two-tuple.")
+    else:
+        gdo = GridDimensionOptimizer()
+        nrows, ncols = gdo.optimal_grid(len(dfRowIndices))
+
+
+    _,ax = plt.subplots(nrows,ncols,figsize=figsize,constrained_layout=True)
+
+    for i,ri in enumerate(dfRowIndices):
+        filepath = df.iloc[ri][filepath_colname]
+        filename = os.path.basename(filepath)
+        
+        if title is None and title_features is None:
+            title = os.path.splitext(filename)[0]
+    
+        if title_features:
+            title = ' | '.join([ str(df.iloc[ri][feature]) for feature in title_features ])
+
+        plotCrossSection(filepath, 
+                         axis_norm, 
+                         slice_depth, 
+                         figsize, 
+                         title, 
+                         show_image_stats=show_image_stats,
+                         ax=ax.flat[i])
 
 
 
@@ -771,9 +1008,20 @@ def orthoPlanes(
     plt.tight_layout()
     return fig, ax
 
-def viewImagesByPatient(df, patient_id, figdims=None, figsize=(12,12), patient_id_colname='patient_id', filepath_colname='filepath'):
+def plotImagesByPatient(df, 
+                        patient_id, 
+                        patient_id_colname='patient_id',
+                        filepath_colname='filepath',
+                        title_features=['image_type','dx_class','laterality'],
+                        feature_headers=False,
+                        figdims=None, figsize=(12,12) 
+                        ):
     ptdf = df[df[patient_id_colname] == patient_id]
+    pt_bscans = ptdf[ptdf['image_type'].str.contains('scan')]
+    # for row in pt_bscans.iterrows
+    
     total = len(ptdf)
+    n_bscans = len()
 
     if figdims:
         nrows,ncols = figdims
@@ -781,19 +1029,134 @@ def viewImagesByPatient(df, patient_id, figdims=None, figsize=(12,12), patient_i
         gdo = GridDimensionOptimizer()
         nrows, ncols = gdo.optimal_grid(total)
 
-    _,ax = plt.subplots(nrows,ncols,figsize=figsize)
+    fig,ax = plt.subplots(nrows,ncols,figsize=figsize)
     
     axf = ax.flat
 
-    
-
     for i in range(total):
         ptrecord = ptdf.iloc[i]
-        imgArr,_ = crossSection(ptrecord[filepath_colname])
+        filepath = ptrecord[filepath_colname]
+        filename = os.path.basename(filepath)
+        imgArr,_ = crossSection(filepath)
         axf[i].imshow(imgArr)
-        axf[i].set_title(f"{ptrecord.image_type} | {ptrecord.dx_class} | {ptrecord.laterality}\n{os.path.basename(ptrecord.filepath)}",fontsize=10)
-    
+        try:
+            if feature_headers:
+                title = " | ".join([f"{k}: {v}" for k,v in ptrecord[title_features].items()])
+            else:
+                title = " | ".join([f"{v}" for k,v in ptrecord[title_features].items()])
+        except:
+            title = os.path.splitext(filename)[0]
+
+        axf[i].set_title(title,fontsize=10)
+
     plt.suptitle(f"Patient {patient_id}",fontsize=12)
     plt.tight_layout()
+
+    return fig
+
+def plotbybscans(df,patient_id,
+                 pid_colname='patient_id',
+                 filepath_colname='filepath',
+                 title_features = ['image_type','dx_class','laterality'],
+                 figdims=None,
+                 figsize=(12,10),
+                 display_filenames=False,
+                 savefig=None
+                ):
+    
+    ptdf = df[df[pid_colname]==patient_id]
+    ptdf = ptdf.reset_index().drop(columns='index')
+    
+    image_indices = []
+    bscan_indices = ptdf[ptdf['image_type'].str.lower().str.match(r'b.scan')].index
+    for bidx in bscan_indices:
+        try:
+            # Check if there is a mask image immediately below the b-scan;
+            # if not, then it has no masks
+            itype_rowbelow = ptdf.iloc[bidx+1]['image_type'].lower()
+            if re.match(r"cup|disc",itype_rowbelow):
+                # get the two rows below the b-scan row (since the max is two masks per b-scan) 
+                masks = ptdf.iloc[bidx+1:bidx+3,:]
+                
+                # and filter out only the ones that have masks
+                # i.e., could result in either 2 or 1 total masks
+                masks = masks[masks['image_type'].str.lower().str.match(r'cup|disc')]
+
+                # extract the row indices the masks
+                mask_indices = list(masks.index)
+            else:
+                # Even if the second row down from the b-scan is a mask, 
+                # but the one immediately below is not (i.e. it's a b-scan), 
+                # then that second row down that is a mask is technicaly a mask 
+                # for the b-scan directly below the one of interest.
+                # Here, in all other cases, we simple set the index for both
+                # cup and disc masks to be None:
+                mask_indices = [None,None]
+        except:
+            # Try-Except block does the same thing, accounts for the case
+            # when the b-scan is the last row in the df and has no masks
+            # in which case attempting to index df.iloc[bidx+3 ] would be
+            # out of bounds / return an error
+            mask_indices = [None,None]
+
+        # This way, len(image_indices) will always be equal to
+        # len(bscan_indices) * 3, corresponding to n_bscans rows
+        # and 3 columns (bscan and its maximum of two masks)
+
+        # Extend image_indices in 3-value batches, in the order
+        # (bscan, cup, disc) with each match corresponding with
+        # a resulting row within the `plt.subplots` plot
+        image_indices.extend([bidx]+mask_indices)
+    
+    # Iterate through image_indices to plot the images, skipping 
+    # subplots when the image index is None (i.e., no mask)
+    # Result should be that every row starts with the b-scan image
+    # and includes any existing masks to the right of the b-scan.
+    nrows = len(bscan_indices)
+    ncols = 3
+    fig,ax = plt.subplots(nrows,ncols,figsize=figsize)
+    axf = ax.flat
+    fig.suptitle(f"B-Scans & Masks for Patient #{patient_id}", 
+                 fontweight='bold',
+                 fontsize=12
+                )
+    for i,idx in enumerate(image_indices):
+        if idx is not None:
+            row = ptdf.iloc[idx]
+            imgarr = cv2.imread(row['filepath'])
+            h,w,c = imgarr.shape
+            axf[i].imshow(imgarr)
+            title = " | ".join([row[feat] for feat in title_features])
+            filename = os.path.basename(row['filepath'])
+            if display_filenames:
+                axf[i].text(x=int(0.15*w),
+                            y=int(0.1*h),
+                            s=filename,
+                            fontsize=8,
+                            color='lime',
+                            rotation=0
+                           )
+            axf[i].set_title(title)
+    plt.tight_layout()
+    if savefig:
+        plt.savefig(savefig)
+        print(f"Figure saved as {savefig}")
+
+
+def viewImagesByPatient(df, 
+                        patient_id, 
+                        patient_id_colname='patient_id',
+                        filepath_colname='filepath',
+                        title_features=['image_type','dx_class','laterality'],
+                        figdims=None, figsize=(12,12) 
+                        ):
+    ptdf = df[df[patient_id_colname] == patient_id]
+    
+    _ = plotImagesByPatient(ptdf, patient_id, patient_id_colname, filepath_colname, title_features, figdims, figsize)
+    
+    plt.show()
+
+    
+
 
 
