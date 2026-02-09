@@ -9,6 +9,37 @@ import cv2
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+def load_sample_volume(
+    index:int=None, name:str=None, 
+    volume_dirpath:str=None
+):
+    if volume_dirpath is None:
+        arrViz_dirpath = os.path.dirname(__file__)
+        # if os.path.basename(arrViz_dirpath) != 'octcv':
+            # print(arrViz_dirpath,'\n')
+        volume_dirpath = os.path.join(arrViz_dirpath,'../datasrc/volumesOCT')
+        
+    if index is not None:
+        volume_filenames = os.listdir(volume_dirpath)
+        volume_filepath = os.path.join(volume_dirpath,volume_filenames[index])
+    elif name is not None:
+        volume_filepath = os.path.join(volume_dirpath,name)
+    else:
+        # print(f"getting list of files within {os.path.abspath(volume_dirpath)}")
+        volume_filenames = os.listdir(volume_dirpath)
+        # print(f"volume_filenames is a {type(volume_filenames)} of len {len(volume_filenames)}")
+        index = np.random.randint(0,len(volume_filenames))
+        # print(f"will apply random index of {index}, which is a {type(index)}")
+        filename = volume_filenames[index]
+        # print(f"the file at index {index} is {filename}")
+        volume_filepath = os.path.join(volume_dirpath,volume_filenames[index])
+        # print(f"the final volume filepath is {volume_filepath}")
+        
+    if not os.path.isfile(volume_filepath):
+        raise ValueError(f"The path \033[45m{volume_filepath}\033[0m does not point to an existing file.")
+
+    return np.load(volume_filepath)
+    
 class volumeViewer:
     def __init__(self, 
                  volume_data:np.ndarray = np.random.randint(0,255,(9,9,9)) 
@@ -18,42 +49,34 @@ class volumeViewer:
             raise ValueError(f"Provided volume_data has ndim = {volume_data.ndim}.  Data must have ndim of either 3 (grayscale) or 4 (color).")
             
         self.data = volume_data
+
+    def sliceViewer(self, data=None, axis=0,plotscale=4):
+        data = self.data if data is None else data
         
-    def sliceViewer(self, data=None, axis=0):
         # 1. Create the base figure
         fig = go.Figure()
     
         # 2. Parse Logic for Axis
-        match axis:
-            case 0:
-                zdata = lambda data,i : data[i,:,:]
-            case 1:
-                zdata = lambda data,i : data[:,i,:]
-            case 2:
-                zdata = lambda data,i : data[:,:,i]
-            case _:
-                raise ValueError('Invalid axis provided.')
-    
-        axdimmap = {
-            0 : data[0,:,:].shape,
-            1 : data[:,0,:].shape,
-            2 : data[:,:,0].shape
-        }
+        def zdata(slice_index,data=data,axis=axis):
+            slices = [slice(None)] * data.ndim
+            slices[axis] = slice_index
+            return data[tuple(slices)][::-1,::-1]
         
         # 3. Add each slice as a 'trace' (initially all hidden except the first)
         for i in range(data.shape[axis]):
-          
             fig.add_trace(
                 go.Heatmap(
                     visible=False,
-                    z=zdata(data,i),
+                    z=zdata(i),
                     colorscale='Viridis',
                     showscale=False
                 )
             )
+
+        middle_slice_index = data.shape[axis]//2
         
         # Make the first trace visible
-        fig.data[0].visible = True
+        fig.data[middle_slice_index].visible = True
         
         # 4. Create the slider steps
         steps = []
@@ -67,26 +90,63 @@ class volumeViewer:
             step["args"][0]["visible"][i] = True  # Make only the current selection visible
             steps.append(step)
         
-        # 5. Add slider to layout
+        # 5. Add slider to layout (Vertical on the right)
         sliders = [dict(
-            active=32,
-            currentvalue={"prefix": f"Axis {axis} Index: "},
-            pad={"t": 50},
+            active=middle_slice_index,
+            currentvalue={
+                "prefix": "Slice #: ", 
+                "visible": True, 
+                "xanchor": "center", # Centers the text relative to the slider bar
+                "offset": 10         # Space between text and slider
+            },
+            pad={"l": 20, "r": 20, "t": 10, "b": 10},
+            x=1.05,               # Positioned just to the right of the plot
+            y=0,                  # Anchored at the bottom
+            len=1,                # Span the full height (0 to 1)
+            xanchor="left",
+            yanchor="bottom",
             steps=steps
         )]
-    
-        f=8
-        h,w = axdimmap[axis]
-        H,W = (np.array([h,w])*f).astype(int)
-        print(W,H)
         
         fig.update_layout(
             sliders=sliders,
-            width=W,
-            height=H,
-            yaxis=dict(autorange='reversed') # Matches standard image orientation
+            margin=dict(r=120, l=50, t=50, b=50), # Increased right margin for the slider
+            yaxis=dict(
+                scaleanchor="x", 
+                scaleratio=1,
+                constrain='domain'
+            ),
+            xaxis=dict(constrain='domain')
         )
+
+        fig.show()
+
+    def surfacePlot(self,data=None):
+        data = self.data if data is None else data
+
+        h,w,d = data.shape
+
+        # Need way to map hwd to whatever j in mgrid...
+        X, Y, Z = np.mgrid[0:255:64j,0:255:128j,0:255:64j,]
+        values = data
         
+        # 2. Define binary threshold
+        threshold = 100
+        
+        # 3. Create Isosurface
+        fig = go.Figure(data=go.Isosurface(
+            x=X.flatten(),
+            y=Y.flatten(),
+            z=Z.flatten(),
+            value=values.flatten(),
+            isomin=threshold,
+            isomax=threshold,
+            surface_count=3,
+            opacity=0.3,
+            colorscale='Viridis'
+        ))
+        
+        fig.update_layout(scene=dict(xaxis_title='X', yaxis_title='Y', zaxis_title='Z'))
         fig.show()
 
     def orthoSlicesViewer(self,data=None):
@@ -183,6 +243,7 @@ class volumeViewer:
 
 #---------------------------------------------------------------------------------------------------------
 
+
 class GridDimensionOptimizer:
     def __init__(self):
         pass
@@ -224,6 +285,14 @@ class GridDimensionOptimizer:
         To see more examples, run `generate_sample_table(number_of_examples)`
 
         """
+
+        # In the case that a single row of plots is desired
+        if preferred_ncols == n:
+            best = (1,n)
+            return best
+            
+        # Otherwise, will prioritize more square-looking figures (i.e., even if n=3 and preferred_cols=3, will recomend (2,2)).  Note: if n=3,preferred_cols=1 --> the following will recommend a single column of plots (3,1), hence only situation where preferred_cols == n must be explicitly written in the if statement above.
+        
         best = None
         best_score = None
 
@@ -251,6 +320,8 @@ class GridDimensionOptimizer:
                 best_score = score
 
         return best
+
+
 
 
 #### PLACEHOLDER -- FUTURE PLAN: 
@@ -452,6 +523,74 @@ def vizInputParser(vizInput):
     # Case 3: unsupported type
     raise TypeError("vizInput must be a numpy ndarray or a path-like (str/Path).")
         
+def getHyperplane(numpy_array, axis=0, slice_index=None, slice_depth=0.5):
+    """
+    Takes an N-dimensional NumPy array as input and returns a "sub-array" with N-1 dimensions found at a specified depth along a given axis of the original array.
+
+    ----------------------------------------------------
+
+        For grayscale 3D volume arrays, this means taking a 2D slice along the specified axis (e.g., x,y,z)
+
+        For grayscale 2D image arrays, this means taking a linear array (row or column).
+
+        For color volumes/images, the same applies, except in the case of specifying the last axis (axis=2 for color 2D images, axis=3 for color 3D volumes), in which case the result is a single color channel of the whole array (e.g., for RGB 2D Image -  a 3D array of shape (h,w,3), passing axis=2 and slice_index=2 would return a 2D array of shape (h,w) with values corresponding to the "Blue" channel.)
+        
+    ----------------------------------------------------
+    
+    """
+    
+    slices = [slice(None)] * numpy_array.ndim
+    if slice_index is None:
+        slice_index = int(numpy_array.shape[axis] * slice_depth)
+    slices[axis] = slice_index
+    return numpy_array[tuple(slices)]
+    
+
+def plotSlice(volume, axis=0, slice_index=None, slice_depth=0.5,figsize=(5,5),ax=None,hide_plot_axes=True):
+    """
+    Plots image of a slice along a given axis of a volume.
+    
+    PARAMS
+    ------
+    **for getHyperplane() function**:
+    
+        volume: a 3D Volume in the form of either a path to a .npy file (str) or NumPy array (np.ndarray) - can either be grayscale (h,w,d) or color (h,w,d,c) [ where c=3 in the case of RGB/BGR, or c=4 in the case of RGBA ]
+    
+        axis: the NumPy axis orthogonal to the slice to be extracted from the volume.  Default is 0 (the first axis).
+    
+        slice_index: specific index of the slice along the axis - if not specified, slice_index will be automatically calculated from slice_depth.  Default is None.
+    
+        slice_depth: value within [0,1] specifying the position along the axis to extract the slice; if slice_index specified, this parameter is ignored.  Otherwise, the slice_index is calculated from slice_depth (e.g., slice_depth=0.25 means get the slice_index that is ~1/4 the way from the first slice to the last slice along the specified axis).  Default is 0.5, meaning the middle slice along the specified axis.
+
+    +++
+
+    **for matplotlib.pyplot subplots**:
+        
+        figsize (Default = (5,5))
+        ax (Default = None)
+        hide_plot_axes (Default = True)
+
+    """
+    numpy_3D_array = vizInputParser(volume)
+    shape = numpy_3D_array.shape
+    
+    if len(shape) == 3 or (len(shape) == 4 and shape[-1] in [3,4]):
+        volume_slice = getHyperplane(numpy_array=numpy_3D_array,
+                      axis=axis,
+                      slice_index=slice_index,
+                      slice_depth=slice_depth)
+    else:
+        raise ValueError(f"numpy_3D_array must be a 3D volume - i.e., must be either a 3D array in the case of pure grayscale, or 4D array in which the length of the last/4th axis (axis=3) is either 3 (RGB/BGR) or 4 (RGBA).  Provided array has shape: {numpy_3D_array.shape}.")
+
+    if ax is None:
+        fig,ax = plt.subplots(figsize=figsize)
+
+    if hide_plot_axes:
+        ax.set_axis_off()
+    else:
+        ax.set_axis_on()
+    ax.imshow(volume_slice)
+
 
 
 def crossSection(vizInput, axis_norm=0,slice_depth=0.5):

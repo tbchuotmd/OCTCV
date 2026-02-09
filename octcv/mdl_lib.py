@@ -31,7 +31,7 @@ from keras.callbacks import Callback
 from keras.src.callbacks.history import History
 from keras.models import load_model
 
-from IPython.display import display,clear_output
+from IPython.display import display,clear_output, Markdown,display_markdown
 import tensorflow as tf
 
 scriptPATH = os.path.realpath(__file__)
@@ -70,33 +70,104 @@ class XVolSet:
     '''
     Class for storing image paths as X (predictor variables), while easily loading all images as arrays when needed via .load() method.
     '''
-    def __init__(self,filepaths):
+    def __init__(self,filepaths,default_load_normalized=True):
         self.filepaths = filepaths
         self.shape = filepaths.shape
-    def __getitem__(self,index):
-        filepaths = pd.DataFrame(self.filepaths.iloc[index]).T
-        return XVolSet(filepaths=filepaths)
-    def load(self,normalized=True):
-        image_paths = self.filepaths
-        # shape: (N, 64, 128, 64)
-        nrows,ncols = np.array(image_paths).shape
+        self.default_load_normalized = default_load_normalized
+        self.summary_stats = None
+        self.calculate_summary_stats(normalized=self.default_load_normalized, verbose=False)
+        self.ndim = self.summary_stats['ndim']
+        self.dtype = self.summary_stats['dtype']
+        self.min = self.summary_stats['min']
+        self.max = self.summary_stats['max']
+        self.mean = self.summary_stats['mean']
+        self.std = self.summary_stats['std']
+        self.n_items = self.summary_stats['n_items']
+        self.size = self.summary_stats['size']
+        self.nbytes = self.summary_stats['nbytes']
 
+    def __getitem__(self, index):
+        # Keep columns intact
+        if isinstance(index, int):
+            sub_df = self.filepaths.iloc[[index]]  # keep as DataFrame, 1 row
+        else:
+            sub_df = self.filepaths.iloc[index]    # slice
+        return XVolSet(filepaths=sub_df,default_load_normalized=self.default_load_normalized)
+
+    def __len__(self):
+        return self.shape[0]
+    
+    def calculate_summary_stats(self,normalized=None, verbose=True):
+        volumes = self.load(normalized=normalized)
+        hrbytes = volumes.nbytes
+
+        if hrbytes > 1e9:
+            hrbytes = f"{hrbytes / 1e9:.2f} GB"
+        elif hrbytes > 1e6:
+            hrbytes = f"{hrbytes / 1e6:.2f} MB"
+        elif hrbytes > 1e3:
+            hrbytes = f"{hrbytes / 1e3:.2f} kB"
+        else:
+            hrbytes = f"{hrbytes} bytes"
+
+        self.summary_stats = {
+            'min': volumes.min(),
+            'max': volumes.max(),
+            'mean': volumes.mean(),
+            'std': volumes.std(),
+            'shape': str(volumes.shape),
+            'dtype': volumes.dtype,
+            'ndim': volumes.ndim,
+            'n_items': f"{volumes.size:,}",
+            'size' : hrbytes,
+            'nbytes': volumes.nbytes
+        }
+        if verbose:
+            self.describe()
+    
+    def describe(self):
+        summary_stats = self.summary_stats
+        sumdf = pd.DataFrame(summary_stats,index=['value']).T
+        sumdf = sumdf.T
+        display(sumdf)
+
+    def load(self, normalized=None):
+        if normalized is None:
+            normalized = self.default_load_normalized
+
+        image_paths = self.filepaths
+    
+        # Ensure consistent DataFrame
+        if isinstance(image_paths, pd.Series):
+            image_paths = image_paths.to_frame().T
+    
+        nrows, ncols = image_paths.shape
+    
         if ncols == 2:
-            if type(image_paths)==pd.DataFrame:
-                col_name = 'normalized_array' if normalized else [ c for c in image_paths.columns if c.startswith('display') ][0]
-                # col_name = 'normalized_array'
-                xarrs = image_paths[col_name].apply(vizInputParser).values
-                xarrs = np.stack(xarrs,axis=0)
-            elif type(image_paths)==np.ndarray or type(image_paths)==list:
-                col_index = 0 if normalized else 1
-                xarrs = np.array([vizInputParser(path) for path in image_paths[:,col_index]]) # shape: (N, 64, 128, 64)
+            col_name = 'normalized_array' if normalized else [c for c in image_paths.columns if c.startswith('display')][0]
+            xarrs = image_paths[col_name].apply(vizInputParser).values
+            xarrs = np.stack(xarrs, axis=0)
         elif ncols == 1:
-            xarrs = np.array([vizInputParser(path) for path in image_paths])
-        xarrs = xarrs[...,np.newaxis] # add channel dim --> (N, 64, 128, 64, 1)
+            xarrs = np.array([vizInputParser(path) for path in image_paths.iloc[:,0]])  # note .iloc[:,0] for 1-column DataFrame
+        else:
+            raise ValueError(f"Unsupported number of columns {ncols} in XVolSet")
+    
+        xarrs = xarrs[..., np.newaxis]
         return xarrs
+    
+    def max(self, normalized=None):
+        return self.load(normalized=normalized).max()
+    
+    def min(self, normalized=None):
+        return self.load(normalized=normalized).min()
+    
+    def __repr__(self):
+        
+        return f"XVolSet({self.shape[0]})"
+
 
 # Function to split datasets into y,X; but X is the XVolSet instance
-def yX_split(df,one_hot_drop=True,summary_report=False):
+def yX_split(df,one_hot_drop=True,summary_report=False,default_load_normalized=True):
     '''
     Splits datasets into y and X, along with y_labels (strings) for downstream interpretation.
 
@@ -132,7 +203,7 @@ def yX_split(df,one_hot_drop=True,summary_report=False):
     # Get both the normalized image paths and the display images paths
     disp_col = [ c for c in df.columns if c.startswith('display') ][0] # can be useful for visualization later on
     X_paths = df[['normalized_array',disp_col]] # "normalized_array" part for training / inference
-    X = XVolSet(X_paths)
+    X = XVolSet(X_paths,default_load_normalized=default_load_normalized)
 
     if summary_report:
         print(f"y_labels shape: {y_labels.shape}")
