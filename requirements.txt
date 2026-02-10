@@ -11,6 +11,9 @@ requests == 2.32.4
 scikit-learn == 1.5.1
 tensorflow == 2.19.0
 mimetypes-magic == 0.4.30
+num2words == 0.5.14
+visualkeras == 0.2.0
 
 # NOTE: These are the versions used during development.
 # Other versions may work but are untested.
+

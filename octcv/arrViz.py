@@ -427,12 +427,13 @@ def pathToArray(path):
     -----
     Uses the `magic` library to determine the file type based on the file contents, and then uses either `numpy.load` for numpy files or `cv2.imread` for image files to load the contents of the file into a numpy array.
     """
+    path = os.path.abspath(path)
     if not os.path.isfile(path):
-        raise ValueError(f"Path {path} does not exist or is not a file.")
+        raise ValueError(f"Path {os.path.relpath(path)} does not exist or is not a file.")
     fileinfo = [magic.from_file(path).lower(), magic.from_file(path, mime=True).lower()]
 
     # Check if the file is a supported image
-    accepted_formats = ['numpy', 
+    accepted_formats = ['numpy', 'data',
                         'jpeg', 'jpg', 
                         'png', 
                         'tiff', 'tif', 
@@ -444,7 +445,7 @@ def pathToArray(path):
     if not any(ext in info for ext in accepted_formats for info in fileinfo):
         raise ValueError(f"File \033[7m{path}\033[0m is not a supported image format.\n\nAccepted formats: {', '.join([f"\033[7m{ext}\033[0m" for ext in accepted_formats])}")
     
-    if fileinfo[0].lower().startswith('numpy'):
+    if fileinfo[0].lower().startswith('numpy') or (fileinfo[0].lower().startswith('data') and path.endswith('.npy')):
         return np.load(path)
     else:
         return cv2.imread(path)
