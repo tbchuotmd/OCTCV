@@ -167,7 +167,12 @@ class XVolSet:
 
 
 # Function to split datasets into y,X; but X is the XVolSet instance
-def yX_split(df,one_hot_drop=True,summary_report=False,default_load_normalized=True):
+def yX_split(df,
+             one_hot_drop=True,
+             summary_report=False,
+             default_load_normalized=True,
+             display_filepath_columns=None
+            ):
     '''
     Splits datasets into y and X, along with y_labels (strings) for downstream interpretation.
 
@@ -176,6 +181,9 @@ def yX_split(df,one_hot_drop=True,summary_report=False,default_load_normalized=T
     df    :    DataFrame, formated per OCTCV project pre-processing
     one_hot_drop: bool, if True, will drop extra column in y
     summary_report : bool, if True, will print a summary of return value stats
+    default_load_normalized : bool, if True, the .load() method of X (XVolSet instance) will by default use the paths to the normalized volume array (if it exists) instead of the display_volume / original paths.  Default is True.
+    display_filepath_columns : list,str,numpy.ndarray, or None -- collection of column names, or str if single column, with filepaths to the volume paths to include in the resulting XVolSet instance; if None, will assume a default display filepath of "display_volume".
+    ***NOTE: will attempt to include ['normalized_array'] column in display_filepath_columns as well, but otherwise omit this if it does not exist.***
 
     RETURNS:
     --------
@@ -201,8 +209,21 @@ def yX_split(df,one_hot_drop=True,summary_report=False,default_load_normalized=T
         y = y[:,0].reshape(-1,1)        
 
     # Get both the normalized image paths and the display images paths
-    disp_col = [ c for c in df.columns if c.startswith('display') ][0] # can be useful for visualization later on
-    X_paths = df[['normalized_array',disp_col]] # "normalized_array" part for training / inference
+    if display_filepath_columns is None:
+        disp_cols = [ c for c in df.columns if c.startswith('display') ][0] # can be useful for visualization later on
+        disp_cols = [disp_cols]
+    elif isinstance(display_filepath_columns,str):
+        disp_cols = [display_filepath_columns]
+    elif isinstance(display_filepath_columns,(list,tuple,np.ndarray)):
+        disp_cols = display_filepath_columns
+    else:
+        raise ValueError(f"Invalid type for display_filepath_columns: {type(display_filepath_columns)} -- acceptable types include list,tuple, numpy.ndarray, str, and None.")
+        
+    try:
+        X_paths = df[['normalized_array'] + list(disp_cols)] # "normalized_array" part for training / inference
+    except:
+        X_paths = df[list(disp_cols)]
+        
     X = XVolSet(X_paths,default_load_normalized=default_load_normalized)
 
     if summary_report:
