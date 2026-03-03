@@ -1,6 +1,8 @@
 # Custom Modules Import
 import os,sys
-sys.path.append(os.path.abspath('..'))
+projectDIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(projectDIR)
+
 from octcv.arrViz import *
 from octcv.mdl_lib import *
 

@@ -1,16 +1,28 @@
-# import os,sys
-# sys.path.append(os.path.abspath('..'))
+import os,sys
+
+scriptDIR = os.path.dirname(os.path.abspath(__file__))
+octcvDIR = os.path.dirname(scriptDIR)
+projectDIR = os.path.dirname(octcvDIR)
+
+sys.path.append(projectDIR)
+
 from octcv.arrViz import *
+from octcv.mdl_lib.callbacks import *
+
 import numpy as np
 import pandas as pd
 import re
 import glob
 import os
 import json
+import time
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from matplotlib import font_manager
+from matplotlib.ticker import MaxNLocator
 from num2words import num2words
 
 import visualkeras as vk
@@ -39,33 +51,9 @@ scriptDIR = os.path.dirname(scriptPATH)
 projectDIR = os.path.dirname(scriptDIR)
 modelingDIR = os.path.join(projectDIR,'p5_Modeling')
 
-# def metabool(obj):
-#     return np.array(obj).any()
-    
 
 
-class LiveCapture(tf.keras.callbacks.Callback):
-    def __init__(self, show_every='epoch'):
-        super().__init__()
-        self.rows = []
-        self.show_every = show_every  # 'batch' or 'epoch'
 
-    def _record(self, step, logs):
-        row = {'step': step, **{k: float(v) for k, v in (logs or {}).items()}}
-        self.rows.append(row)
-        # live table in Jupyter
-        clear_output(wait=True)
-        display(pd.DataFrame(self.rows).round(5).tail(20))  # show last 20
-
-    def on_train_batch_end(self, batch, logs=None):
-        if self.show_every == 'batch':
-            self._record(step=batch, logs=logs)
-
-    def on_epoch_end(self, epoch, logs=None):
-        if self.show_every == 'epoch':
-            self._record(step=epoch+1, logs=logs)
-
-# Define class that stores arrays of filepaths, with a method to load the files as numpy arrays and format as needed
 class XVolSet:
     '''
     Class for storing image paths as X (predictor variables), while easily loading all images as arrays when needed via .load() method.
@@ -234,63 +222,6 @@ def yX_split(df,
     return y_labels, y, X
 
 
-# Helper function that creates a single residual block.
-def residual_block(x, filters, kernel_size=3, strides=1, activation='relu'):
-    shortcut = x
-        
-    # First convolution
-    x = Conv3D(filters, kernel_size=kernel_size, strides=strides, padding='same')(x)
-    x = BatchNormalization()(x)
-    x = ReLU()(x)
-    
-    # Second convolution
-    x = Conv3D(filters, kernel_size=kernel_size, padding='same')(x)
-    x = BatchNormalization()(x)
-    
-    # Handle potential shape mismatch for the skip connection
-    # This occurs when strides > 1
-    if strides != 1:
-        shortcut = Conv3D(filters, kernel_size=1, strides=strides, padding='same')(shortcut)
-        shortcut = BatchNormalization()(shortcut)
-    
-    # Add the skip connection to the main path
-    x = Add()([x, shortcut])
-    x = ReLU()(x)
-    
-    return x
-
-
-# This code uses the functional API to construct the full model by chaining the residual blocks together.
-def build_resnet_like_model(input_shape=(64, 128, 64, 1), num_classes=2):
-    inputs = Input(shape=input_shape)
-    
-    # Initial layer: reduced filters and larger kernel
-    x = Conv3D(16, kernel_size=5, strides=2, padding='same')(inputs)
-    x = BatchNormalization()(x)
-    x = ReLU()(x)
-    
-    # Residual Block 1: No change in spatial dimensions
-    x = residual_block(x, filters=16, strides=1)
-    
-    # Residual Block 2: Reduce spatial dimensions with stride 2
-    x = residual_block(x, filters=32, strides=2)
-    
-    # Residual Block 3: No change in spatial dimensions
-    x = residual_block(x, filters=32, strides=1)
-    
-    # Global Average Pooling
-    x = GlobalAveragePooling3D()(x)
-    
-    # Dense layer for classification
-    outputs = Dense(num_classes, activation='softmax')(x)
-    
-    # Create and return the model
-    model = kerasModel(inputs, outputs)
-    return model
-
-#--------------------------------------------------------------
-
-
 ### EDIT TO ALLOW COMPARISONS OF PLOTS BETWEEN MODELS
 ### Currently, issue is: loss,acc,auc are required for the axvline in the plot
 ###     these all come from model.evaluate(), which requires the whole model.
@@ -302,8 +233,6 @@ def get_saved_epoch(model,model_history, test_set):
     loss, acc, auc = model.evaluate( X_test.load(), y_test )
     saved_epoch = [ i for i,v in enumerate(model_history.history['val_auc']) if round(v,4) == round(auc,4) ][0]
     return loss,acc,auc,saved_epoch
-
-
 
 def plotAUC(model_history, test_set, saved_epoch_data, ax=None, figsize=(8,4)):
     saved_loss,saved_acc,saved_auc,saved_epoch = saved_epoch_data
@@ -319,7 +248,6 @@ def plotAUC(model_history, test_set, saved_epoch_data, ax=None, figsize=(8,4)):
     ax.text(saved_epoch+.2,.8,f"val:    {saved_auc:.4f}\ntrain:  {model_history.history['auc'][saved_epoch]:.4f}")
     ax.legend()
     _ = ax.set_title('AUC over Epochs')
-
 
 class ModelVisualizer:
     def __init__(self, model):
@@ -808,7 +736,8 @@ class ModelEvaluator:
               batch_size=8,
               shuffle=False,
               verbose=1,
-              live=False,
+              live_plot=False,
+              metrics_to_plot=['auc','val_auc'],
               **kwargs):
 
         '''
@@ -847,19 +776,14 @@ class ModelEvaluator:
         -------
         None
         '''
-        
-        header_text = f"Training model: {self.model.name}"
-        print(f"{'='*len(header_text)}\n{header_text}\n{'='*len(header_text)}")
-
         start = datetime.now()
-        print(f"\n\033[32;1mBEGIN:\033[0m \033[100;97m{start.strftime('%Y-%m-%d %H:%M:%S')}\033[0m\n")
-        print('━'*50,'\n')
+        if not live_plot:
+            header_text = f"Training model: {self.model.name}"
+            print(f"{'='*len(header_text)}\n{header_text}\n{'='*len(header_text)}")
+            print(f"\n\033[32;1mBEGIN:\033[0m \033[100;97m{start.strftime('%Y-%m-%d %H:%M:%S')}\033[0m\n")
+            print('━'*50,'\n')
         
-        early_stop = EarlyStopping(
-            monitor=monitor,
-            patience=patience,
-            restore_best_weights=restore_best_weights
-        )
+
 
         self.model.compile(
             optimizer = optimizer_function(learning_rate=learning_rate),
@@ -867,11 +791,22 @@ class ModelEvaluator:
             metrics = metrics
         )
 
-        callbacks = [early_stop]
-        if live:
-            live = LiveCapture(show_every='epoch')
-            callbacks.append(live)
+        # CALLBACKS
+        callbacks = []
+        early_stop = EarlyStopping(
+            monitor=monitor,
+            patience=patience,
+            restore_best_weights=restore_best_weights
+        )
+        callbacks.append(early_stop)
 
+        if live_plot:
+            callbacks.append(LivePlot(metrics_to_plot=metrics_to_plot))
+
+        if verbose == 0:
+            callbacks.append(EpochProgressBar())
+
+        # RUN TRAINING and STORE HISTORY
         self.history = self.model.fit(
             self.X_train.load(),
             self.y_train,
@@ -887,16 +822,19 @@ class ModelEvaluator:
         self.epochs = self.history.epoch
 
         end = datetime.now()
-        print('━'*50)
-        print(f"\n\033[31;1mEND:\033[0m \033[100;97m{end.strftime('%Y-%m-%d %H:%M:%S')}\033[0m")
-        print('\n','-'*30)
         duration = end - start
-        print(f"\033[33;1mELAPSED TIME:\033[0m \033[100;97m{duration}\033[0m\n")
         self.training_time = {
             'start': start,
             'end': end,
             'duration': duration
         }
+
+        if not live_plot:
+            print('━'*50)
+            print(f"\n\033[31;1mEND:\033[0m \033[100;97m{end.strftime('%Y-%m-%d %H:%M:%S')}\033[0m")
+            print('\n','-'*30)
+            print(f"\033[33;1mELAPSED TIME:\033[0m \033[100;97m{duration}\033[0m\n")
+
     
     def optimalThreshold(self,method='roc_curve'):
         '''
