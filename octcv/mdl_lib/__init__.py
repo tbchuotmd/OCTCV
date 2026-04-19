@@ -1,3 +1,7 @@
+###=================================###
+### OCTCV/octcv/mdl_lib/__init__.py ###
+###=================================###
+
 import os,sys
 
 scriptDIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +27,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from matplotlib import font_manager
 from matplotlib.ticker import MaxNLocator
+import seaborn as sns
 from num2words import num2words
 
 import visualkeras as vk
@@ -44,12 +49,227 @@ from keras.src.callbacks.history import History
 from keras.models import load_model
 
 from IPython.display import display,clear_output, Markdown,display_markdown
+from IPython.display import HTML
 import tensorflow as tf
+
+import base64
+from io import BytesIO
+from PIL import Image
 
 scriptPATH = os.path.realpath(__file__)
 scriptDIR = os.path.dirname(scriptPATH)
 projectDIR = os.path.dirname(scriptDIR)
 modelingDIR = os.path.join(projectDIR,'p5_Modeling')
+
+def numpy_to_html_img(arr, cmap_name='viridis', width='40%'):
+    # 1. Convert numpy array to PIL Image
+    # (Ensure your array is uint8; if it's float 0-1, multiply by 255)
+    if arr.dtype != np.uint8:
+        arr = arr.astype(np.uint8)
+
+    sm = plt.get_cmap(cmap_name)
+    rgba_array = sm(arr)
+    rgba_uint8 = (rgba_array * 255).astype(np.uint8)
+    img = Image.fromarray(rgba_uint8)
+    
+    # 2. Save to a bytes buffer
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    
+    # 3. Encode to base64 string
+    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    
+    # 4. Return the HTML img tag
+    width = width if isinstance(width,str) else str(width)+'px'
+    return f'<img src="data:image/png;base64,{img_str}" style="width:{width}; height:auto; align" />'
+
+def describe_array(array):
+    cols = "min mean median max std sum".split(' ')
+    vals = [array.min(),array.mean(),np.median(array),array.max(),array.std(), array.sum()]
+    return pd.DataFrame(vals,index=cols).T
+
+def describeArrayHTML(array,title='',output='return',tblwidth=None):
+    floatFormatter = lambda x : str(round(x,2)) if round(x) - x != 0 else f"{int(x):,d}"
+    tid = np.random.randint(0,int(1e5))
+    
+    html = describe_array(array).to_html(
+        index=False,
+        border=0,
+        justify='center',
+        float_format=floatFormatter,
+        table_id = tid
+    )
+
+    cmap = {
+        'ttxt':'white',
+        'tbkgr':'#585880',
+        'htxt':'#29313d',
+        'hbkgr':'#e0dfff',
+        'ctxt':'black',
+        'cbkgr':'white'
+    }
+
+    if tblwidth is None:
+        tblwidth = 100 if title else 50
+    
+    styleTag = f"""
+    <style>
+      .tab-figure {{
+        display: inline-block;
+        border: 1px solid #ccc;
+        border-top-left-radius: 8px;
+        border-top-right-radius: 8px;
+        border-bottom-left-radius: 8px;
+        border-bottom-right-radius: 8px;
+        margin: 10px;
+      }}
+      
+      .tab-title {{
+        background-color: {cmap['tbkgr']};
+        color: {cmap['ttxt']};
+        padding: 8px 8px;
+        font-weight: bold;
+        font-size: 100%;
+        border-top-left-radius: 6px;
+        border-top-right-radius: 6px;
+        text-align: center;
+      }}
+      
+        .dataframe[id="{tid}"] {{
+            border-collapse: collapse;
+            margin: 0 0 0 0;
+            width: {tblwidth}%;
+        }}
+        
+        .dataframe td, .dataframe th {{
+            text-align: center !important;
+            padding: 8px;
+            border-color: #96D4D4 !important;
+            overflow-wrap: hidden;
+        }}
+    
+        .dataframe th {{
+            color: {cmap['htxt']};
+            background-color: {cmap['hbkgr']};
+            border: 1px solid #5c6e89 !important;
+        }}
+    
+        .dataframe td {{
+            color: {cmap['ctxt']};
+            background-color: {cmap['cbkgr']}; 
+            border: 1px solid #96D4D4 !important; 
+        }}
+    </style>
+    """
+
+    htmlElements = [
+        styleTag,
+        '<div class="tab-figure">' if title else '',
+         f'  <div class="tab-title">{title}</div>' if title else '',
+        html,
+        '  </div>' if title else '',
+        '</div>' if title else ''
+    ]
+        
+    htmlContent = '\n'.join(htmlElements)
+    # print(htmlContent)
+    match output:
+        case 'html' | 'return':
+            return htmlContent
+        case 'disp':
+            display(HTML(htmlContent))
+        case _:
+            display(HTML(htmlContent))
+
+def imgStatsCompare(images,titles=('Original','Noisy')):
+    cdiv = lambda innerHTML : f'<div style="text-align: center;">{innerHTML}</div>'
+    itagL = cdiv(numpy_to_html_img(images[0]))
+    itagR = cdiv(numpy_to_html_img(images[1]))
+    tabL = cdiv(describeArrayHTML(images[0],title=titles[0],
+                                  output='html',tblwidth=100))
+    tabR = cdiv(describeArrayHTML(images[1],title=titles[1],
+                                  output='html',tblwidth=100))
+    html = f"""
+    <table style="width: 100%; max-width: 800px; text-align: center;">
+      <tbody style="text-align: center;">
+        <tr style="text-align: center;">
+          <td>{tabL}</td>
+          <td>{tabR}</td>
+        </tr>
+        <tr style="text-align: center;">
+        <div style="text-align: center;">
+          <td>{itagL}</td>
+          <td>{itagR}</td>
+        </div>
+        </tr>
+      </tbody>
+    </table>
+    """
+    display(HTML(html))
+    
+def MinMaxScaleNDArray(array,value_range=(0,255),verbose=False,histplots=False,preview=False):
+    resmin,resmax = value_range
+    # scaled = array - array.min() + resmin
+    # scaled = scaled * (resmax / scaled.max())
+    scaled = resmin + ((array - array.min()) / (array.max() - array.min())) * (resmax - resmin)
+    scaled = scaled.astype(int)
+    
+    if verbose:
+        array_stats = describe_array(array)
+        scaled_stats = describe_array(scaled)
+        compare = pd.concat([array_stats,scaled_stats],axis=0)
+        compare.index = ['Original','MinMaxScaled']
+        display(compare)
+    if histplots and not preview:
+        df = pd.DataFrame(np.array([array.flatten(),scaled.flatten()]).T,columns=['Original','Result'])
+        # df.hist(figsize=(12,4),bins=100)
+        plt.hist(df,alpha=0.5,bins=100)
+    elif preview and histplots:
+        fig,axes = plt.subplots(2,2,figsize=(10,6),sharex='col')
+        
+        # Histograms
+        nbins = int( array.size / array.size**(2/3) )
+        colors = ['green','red']
+        data = [array.flatten(),scaled.flatten()]
+        
+        for i,ax in enumerate(axes[:,1]):
+            ax.grid(True)
+            sns.histplot(data[i],
+                         kde=True,
+                         line_kws=dict(
+                             lw=2.5,
+                             ls='-',
+                             alpha=0.9
+                         ),
+                         color=colors[i], 
+                         bins=nbins, 
+                         alpha=0.5, 
+                         ax=ax)
+            # ax.hist(array.flatten(), color=colors[i], bins=nbins, alpha=0.9)
+            ax.set_xlim(0,255)
+            ax.set_xticks(np.arange(0,255,25))
+            ax.set_ylabel('Number of Pixels',fontsize=12)
+            if i==1:
+                ax.set_xlabel('Pixel Intensity',fontsize=12)
+
+        for i,ax in enumerate(axes[:,0]):
+            ax.axis('off')
+
+        # Images
+        axes[0,0].imshow(array)
+        axes[0,0].set_title('Original',fontsize=14)
+        
+        axes[1,0].imshow(scaled)
+        axes[1,0].set_title('Result',fontsize=14)
+
+        plt.tight_layout()
+        
+    elif preview and not histplots:
+        fig,(l,r) = plt.subplots(1,2,figsize=(8,5))
+        l.imshow(array); l.axis('off'); l.set_title('Original')
+        r.imshow(scaled); r.axis('off'); r.set_title('Result')
+        
+    return scaled
 
 
 
@@ -60,6 +280,7 @@ class XVolSet:
     '''
     def __init__(self,filepaths,default_load_normalized=True):
         self.filepaths = filepaths
+        self.tf_dataset = None
         self.shape = filepaths.shape
         self.default_load_normalized = default_load_normalized
         self.summary_stats = None
@@ -73,7 +294,7 @@ class XVolSet:
         self.n_items = self.summary_stats['n_items']
         self.size = self.summary_stats['size']
         self.nbytes = self.summary_stats['nbytes']
-
+    
     def __getitem__(self, index):
         # Keep columns intact
         if isinstance(index, int):
@@ -85,10 +306,116 @@ class XVolSet:
     def __len__(self):
         return self.shape[0]
     
-    def calculate_summary_stats(self,normalized=None, verbose=True):
-        volumes = self.load(normalized=normalized)
-        hrbytes = volumes.nbytes
+    def getDisplayFilePaths(self):
+        # If 2D array/DataFrame:
+        if self.filepaths.ndim == 2:
+            # If there are 2 columns
+            if self.filepaths.shape[1] == 2:
+                # Get the second column only
+                if isinstance(self.filepaths,pd.DataFrame):
+                    filepaths = self.filepaths.iloc[:,1].values
+                else:
+                    filepaths = self.filepaths[1]
+            # if there is only 1 column
+            elif self.filepaths.shape[1] == 1:
+                # Get the only column as a linear array
+                if isinstance(self.filepaths,pd.DataFrame):
+                    filepaths = self.filepaths.iloc[:,0].values
+                else:
+                    filepaths = self.filepaths[0]
+            else:
+                raise ValueError('Improper self.filepaths shape')
+        # If 1D linear array
+        elif self.filepaths.ndim == 1:
+            filepaths = self.filepaths
+        else:
+            raise ValueError('Improper self.filepaths shape')
+        return filepaths
 
+    def tfBatchedDataset(self):
+        '''Converts filepaths to non-normalized volumes into a tensorflow dataset for calculation of summary statistics in batches rather than all at once.  This prevents running out of RAM in the case of large datasets.
+
+        The method stores the resulting tensorflow dataset under self.tf_dataset if not already done, and subsequent runs will simply return self.tf_dataset.
+        '''
+        if self.tf_dataset is None:
+            filepaths = self.getDisplayFilePaths()
+            
+            def load_npy(path):
+                data = np.load(path.numpy().decode())
+                return data.astype(np.float32)
+            
+            tf_dataset = tf.data.Dataset.from_tensor_slices(filepaths)
+            
+            tf_dataset = tf_dataset.map(
+                lambda x:tf.py_function(load_npy, [x], tf.float32),
+                num_parallel_calls=tf.data.AUTOTUNE
+            )
+            
+            tf_dataset = tf_dataset.prefetch(tf.data.AUTOTUNE)
+            self.tf_dataset = tf_dataset
+        else:
+            tf_dataset = self.tf_dataset
+        return tf_dataset
+        
+    def getMax(self):
+        tf_dataset = self.tfBatchedDataset()
+        global_max = -np.inf
+        for batch in tf_dataset:
+            batch_max = tf.reduce_max(batch)
+            if batch_max > global_max:
+                global_max = batch_max
+        return global_max.numpy()
+        
+    def getMin(self):
+        tf_dataset = self.tfBatchedDataset()
+        global_min = np.inf
+        for batch in tf_dataset:
+            batch_min = tf.reduce_min(batch)
+            if batch_min < global_min:
+                global_min = batch_min
+        return global_min.numpy()
+
+    def getMean(self):
+        tf_dataset = self.tfBatchedDataset()
+        batch_means = []
+        for batch in tf_dataset:
+            batch_means.append(tf.reduce_mean(batch).numpy())
+        return np.array(batch_means).mean()
+        
+    def getStDev(self):
+        tf_dataset = self.tfBatchedDataset()
+        all_means = []
+        all_vars = []
+        all_sizes = []
+        
+        # 1. Collect statistics for each batch
+        for batch in tf_dataset:
+            all_means.append(tf.reduce_mean(batch).numpy())
+            all_vars.append(tf.math.reduce_variance(batch).numpy())
+            all_sizes.append(tf.size(batch).numpy())
+        
+        n_total = sum(all_sizes)
+        
+        # 2. Calculate the combined mean
+        mean_total = sum(m * s for m, s in zip(all_means, all_sizes)) / n_total
+        
+        # 3. Calculate "Within-Batch" Variance (weighted average of batch variances)
+        var_within = sum(v * s for v, s in zip(all_vars, all_sizes)) / n_total
+        
+        # 4. Calculate "Between-Batch" Variance (how far batch means are from total mean)
+        var_between = sum(s * (m - mean_total)**2 for m, s in zip(all_means, all_sizes)) / n_total
+        
+        # 5. Total Standard Deviation is the square root of the sum of variances
+        return np.sqrt(var_within + var_between)
+
+    def getSize(self):
+        filepaths = self.getDisplayFilePaths()
+        
+        total_size = 0
+        for path in filepaths:
+            total_size += os.path.getsize(path)
+
+        hrbytes = int(total_size)
         if hrbytes > 1e9:
             hrbytes = f"{hrbytes / 1e9:.2f} GB"
         elif hrbytes > 1e6:
@@ -98,25 +425,62 @@ class XVolSet:
         else:
             hrbytes = f"{hrbytes} bytes"
 
+        return total_size,hrbytes
+
+    def getShapeNDimsNitemsDtype(self):
+        '''Calculate shape,ndim,size of final dataset without loading the whole thing.
+
+        RETURNS
+        ---
+        tuple (final_shape, final_ndims, final_nitems)
+        '''
+        # safe to assume all data points (visual arrays like images/volumes) would have the same shape in a given dataset, as the CNN only accepts one input shape; thus can sample any random volume, load it, and simply add a batch and channel dimension.  Batch dim is multiplied by the number of datapoints.
+        filepaths = self.getDisplayFilePaths()
+        rvpath = np.random.choice(filepaths)
+        ranvol = np.load(rvpath)
+        baseshape = list(ranvol.shape)
+        N = len(filepaths)
+
+        dtype = ranvol.dtype
+        
+        final_shape = np.array([N] + baseshape + [0])
+        
+        final_ndims = len(final_shape)
+
+        # Multiply non-zero elements of a single volume, then multiply that by number of volumes N
+        final_nitems = N * np.prod(final_shape[final_shape != 0])
+
+        # Return tuple of global dataset shape, global dataset number of dimensions, and total number of elements
+        return tuple(final_shape),final_ndims,final_nitems,dtype
+    
+    def calculate_summary_stats(self,normalized=None, verbose=True):
+        # volumes = self.load(normalized=normalized) 
+        tf_dataset = self.tfBatchedDataset()
+        
+        size,hrbytes = self.getSize()
+        shape,ndim,nitems,dtype = self.getShapeNDimsNitemsDtype()
+        
         self.summary_stats = {
-            'min': volumes.min(),
-            'max': volumes.max(),
-            'mean': volumes.mean(),
-            'std': volumes.std(),
-            'shape': str(volumes.shape),
-            'dtype': volumes.dtype,
-            'ndim': volumes.ndim,
-            'n_items': f"{volumes.size:,}",
-            'size' : hrbytes,
-            'nbytes': volumes.nbytes
+            'min': self.getMin(),
+            'max': self.getMax(),
+            'mean': self.getMean(),
+            'std': self.getStDev(),
+            'shape': str(shape),
+            'dtype': dtype,
+            'ndim': ndim,
+            'n_items': f"{nitems:,}",
+            'size' : size,
+            'nbytes': hrbytes
         }
         if verbose:
             self.describe()
     
     def describe(self):
         summary_stats = self.summary_stats
-        sumdf = pd.DataFrame(summary_stats,index=['value']).T
-        sumdf = sumdf.T
+        sumdf = pd.DataFrame(summary_stats,index=['value'])
+        vals = sumdf.T['value'].apply(lambda x : f"{round(x,2):.2f}" if isinstance(x,float) else x)
+        data = [[v] for v in vals]
+        sumdf = pd.DataFrame(data,index=sumdf.columns).T
         display(sumdf)
 
     def load(self, normalized=None):
