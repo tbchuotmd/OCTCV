@@ -271,29 +271,32 @@ def MinMaxScaleNDArray(array,value_range=(0,255),verbose=False,histplots=False,p
         
     return scaled
 
-
-
-
 class XVolSet:
     '''
     Class for storing image paths as X (predictor variables), while easily loading all images as arrays when needed via .load() method.
     '''
-    def __init__(self,filepaths,default_load_normalized=True):
+    def __init__(self,
+                 filepaths,
+                 load_summary_stats_on_init=False,
+                 default_load_normalized=True):
+        
         self.filepaths = filepaths
         self.tf_dataset = None
         self.shape = filepaths.shape
         self.default_load_normalized = default_load_normalized
         self.summary_stats = None
-        self.calculate_summary_stats(normalized=self.default_load_normalized, verbose=False)
-        self.ndim = self.summary_stats['ndim']
-        self.dtype = self.summary_stats['dtype']
-        self.min = self.summary_stats['min']
-        self.max = self.summary_stats['max']
-        self.mean = self.summary_stats['mean']
-        self.std = self.summary_stats['std']
-        self.n_items = self.summary_stats['n_items']
-        self.size = self.summary_stats['size']
-        self.nbytes = self.summary_stats['nbytes']
+        
+        if load_summary_stats_on_init:
+            self.calculate_summary_stats(normalized=self.default_load_normalized, verbose=False)
+            self.ndim = self.summary_stats['ndim']
+            self.dtype = self.summary_stats['dtype']
+            self.min = self.summary_stats['min']
+            self.max = self.summary_stats['max']
+            self.mean = self.summary_stats['mean']
+            self.std = self.summary_stats['std']
+            self.n_items = self.summary_stats['n_items']
+            self.size = self.summary_stats['size']
+            self.nbytes = self.summary_stats['nbytes']
     
     def __getitem__(self, index):
         # Keep columns intact
@@ -305,6 +308,23 @@ class XVolSet:
 
     def __len__(self):
         return self.shape[0]
+    
+    def __iter__(self):
+        for i in range(self.shape[0]):
+            yield self[i]
+    
+    def iter_batches(self, y, batch_size):
+        for i in range(0, len(self), batch_size):
+            X_batch = [np.squeeze(self[j].load(),axis=0) for j in range(i, min(i + batch_size, len(self)))]
+            X_batch = np.stack(X_batch).astype(np.float32)
+            y_batch = np.array(y[i:i + batch_size]).astype(np.float32)
+            yield X_batch,y_batch
+
+    def __repr__(self):
+        return f"XVolSet({self.shape[0]})"
+    
+    def __str__(self):
+        return f"XVolSet({self.shape[0]})"
     
     def getDisplayFilePaths(self):
         # If 2D array/DataFrame:
@@ -443,7 +463,7 @@ class XVolSet:
 
         dtype = ranvol.dtype
         
-        final_shape = np.array([N] + baseshape + [0])
+        final_shape = np.array([N] + baseshape + [1],dtype=int)
         
         final_ndims = len(final_shape)
 
@@ -465,7 +485,7 @@ class XVolSet:
             'max': self.getMax(),
             'mean': self.getMean(),
             'std': self.getStDev(),
-            'shape': str(shape),
+            'shape': shape,
             'dtype': dtype,
             'ndim': ndim,
             'n_items': f"{nitems:,}",
@@ -476,7 +496,12 @@ class XVolSet:
             self.describe()
     
     def describe(self):
+        if self.summary_stats is None:
+            print("Calculating summary stats...",end='\r')
+            self.calculate_summary_stats(normalized=self.default_load_normalized, verbose=False)
+            print("")
         summary_stats = self.summary_stats
+        summary_stats['shape']=str(summary_stats['shape'])
         sumdf = pd.DataFrame(summary_stats,index=['value'])
         vals = sumdf.T['value'].apply(lambda x : f"{round(x,2):.2f}" if isinstance(x,float) else x)
         data = [[v] for v in vals]
@@ -1169,12 +1194,80 @@ class ModelEvaluator:
 
         if verbose == 0:
             callbacks.append(EpochProgressBar())
+        
+        # Define Batch Generator
+        def createBatchGenerator(settype='train'):
+            '''
+            Function to create a batch generator function for XVolSet instances - so instead of XVolSet.load() which can consume memory, we can use XVolSet.iter_batches()
+            
+            ***Note: this still needs to be converted to tf.data.Dataset in the next step before feeding into tensorflow's model.fit()
+
+            Parameters
+            ----------
+            settype : str, optional
+                The type of set to create the batch generator for. The default is 'train'.
+
+            Returns
+            -------
+            batch_generator : function
+                The batch generator function.
+            input_shape : tuple
+                The shape of the input data.
+            label_shape : tuple
+                The shape of the label data.
+            '''
+            match settype:
+                case 'train':
+                    X = self.X_train
+                    y = self.y_train
+                case 'valid':
+                    X = self.X_valid
+                    y = self.y_valid
+                case 'eval':
+                    X = self.X_eval
+                    y = self.y_eval
+                case _:
+                    raise ValueError(f"Invalid settype: {settype}")
+            try:
+                input_fullshape = X.summary_stats['shape']
+                # in case the shape is a string represention of a tuple instead of an actual tuple
+                if isinstance(input_fullshape,str):
+                    input_fullshape = tuple([int(e.strip()) for e in input_fullshape.strip(' () ').split(',')])
+                # subset everything but the first value (i.e., don't include batch)
+                input_shape = input_fullshape[1:]
+            except:
+                input_shape = X[0].load().shape[1:]
+            # same here, don't include batch
+            label_shape = y[0].shape
+            
+            def batch_generator(X=X, y=y, batch_size=8):
+                for X_batch, y_batch in X.iter_batches(y, batch_size):
+                    yield X_batch, y_batch
+            
+            return batch_generator, input_shape, label_shape
+
+        def datagenToTF(settype='train'):
+            # Create Batch Generator Function for XVolSet of type settype
+            data_gen, input_shape, label_shape = createBatchGenerator(settype=settype)
+            
+            # Convert to tf.data.Dataset
+            tfdataset = tf.data.Dataset.from_generator(
+                data_gen,
+                output_signature=(
+                    tf.TensorSpec(shape=(None, *input_shape), dtype=tf.float32),
+                    tf.TensorSpec(shape=(None, *label_shape), dtype=tf.float32)
+                )
+            )
+            tfdataset = tfdataset.prefetch(tf.data.AUTOTUNE)
+            return tfdataset
+
+        train_dataset = datagenToTF('train')
+        valid_dataset = datagenToTF('valid')
 
         # RUN TRAINING and STORE HISTORY
         self.history = self.model.fit(
-            self.X_train.load(),
-            self.y_train,
-            validation_data=(self.X_valid.load(),self.y_valid),
+            x=train_dataset, # train_dataset includes both X and y (i.e., leaving arg for `y=` blank as keras/tf knows to look for both X and y in the argument passed into x=, and if only X is in there then it looks for the rest in y=)
+            validation_data=valid_dataset,
             epochs=num_epochs,
             batch_size=batch_size,
             callbacks=callbacks,
