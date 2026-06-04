@@ -1,13 +1,22 @@
+"""
+octcv.mdl_lib.callbacks - Custom Keras callbacks for training visualization.
+
+Provides:
+    - EpochProgressBar: Inline progress bar for silent training (verbose=0)
+    - LivePlot: Real-time matplotlib training metrics plot in Jupyter
+    - LiveCapture: Tabular live display of training metrics
+"""
 
 import sys
 import time
 import tensorflow as tf
-from IPython.display import clear_output
+from IPython.display import clear_output, display
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from datetime import datetime,timedelta
+from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import numpy as np
+import pandas as pd
 
 def ftime(total_seconds,use_abbreviated_units=False):
     '''

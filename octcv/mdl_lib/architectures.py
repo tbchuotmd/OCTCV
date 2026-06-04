@@ -1,48 +1,46 @@
-# Custom Modules Import
-import os,sys
-projectDIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(projectDIR)
+"""
+octcv.mdl_lib.architectures - CNN model architectures for OCT volume classification.
 
-from octcv.arrViz import *
-from octcv.mdl_lib import *
+Provides:
+    - buildSequential: Original 5-block Conv3D sequential model
+    - buildResNet: ResNet-like model with skip connections
+    - buildAttnNN: Attention-augmented ResNet (SE + spatial attention)
+"""
 
-# Silence Benign Warnings
-os.environ["KERAS_BACKEND"] = "tensorflow"     # stop Keras from probing other backends
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"       # 0=all, 1=INFO off, 2=+WARNING off, 3=+ERROR off
-# Optional: disable oneDNN optimized kernels if you want bit-for-bit stability on CPU
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-
-# General
-import re
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from IPython.display import display as iPyDisplay, Markdown as iPyMD
-
-# Additional Pre-Processing
-from sklearn.model_selection import train_test_split
-
-# Modeling (Tensorflow/Keras)
-from visualkeras import layered_view
+import os
 import tensorflow as tf
 from keras.models import Sequential
 from keras import layers
-from keras.layers import Conv3D,Conv2D,Dense,MaxPool2D,MaxPool3D,Flatten,Dropout,\
-BatchNormalization,GlobalAveragePooling3D,GlobalAveragePooling2D,ReLU,Input,Add
-from keras.metrics import AUC
-from keras.optimizers import Nadam
-from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.layers import (Conv3D, Dense, BatchNormalization,
+                          GlobalAveragePooling3D, ReLU, Input, Add)
 from keras import Model as kerasModel
 from keras import ops as Kops
 
-# Model Evaluation
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report, roc_curve
-
 # MODEL 1 : ORIGINAL SEQUENTIAL
-def buildSequential(input_shape=(64,128,64,1),
+def buildSequential(input_shape=(64, 128, 64, 1),
                     activation='sigmoid',
                     n_classes=1,
                     model_name='original'):
+    """
+    Build the original 5-block Conv3D sequential model.
+
+    Architecture: 5× (Conv3D → BatchNorm → ReLU) → GAP3D → Dense(sigmoid).
+
+    Parameters
+    ----------
+    input_shape : tuple
+        Shape of input volumes (D, H, W, C). Default: (64, 128, 64, 1).
+    activation : str
+        Output activation. 'sigmoid' for binary, 'softmax' for multi-class.
+    n_classes : int
+        Number of output units. Forced to 1 when activation='sigmoid'.
+    model_name : str
+        Name prefix for the model.
+
+    Returns
+    -------
+    keras.Sequential
+    """
     
     if activation == 'sigmoid':
         n_classes = 1
@@ -92,10 +90,30 @@ def buildSequential(input_shape=(64,128,64,1),
 
 
 # MODEL 2: RESNET-LIKE
-    
-def buildResNet(input_shape=(64, 128, 64, 1), 
-                activation='sigmoid',n_classes=1,
+
+def buildResNet(input_shape=(64, 128, 64, 1),
+                activation='sigmoid', n_classes=1,
                 name='ResNetLike'):
+    """
+    Build a ResNet-like model with residual skip connections.
+
+    Architecture: Conv3D stem → 3× residual blocks → GAP3D → Dense.
+
+    Parameters
+    ----------
+    input_shape : tuple
+        Input volume shape. Default: (64, 128, 64, 1).
+    activation : str
+        Output activation function.
+    n_classes : int
+        Output units. Forced to 1 for sigmoid.
+    name : str
+        Model name.
+
+    Returns
+    -------
+    keras.Model
+    """
     
     def residual_block(x, filters, kernel_size=3, strides=1, activation='relu'):
         shortcut = x
@@ -158,9 +176,29 @@ def buildResNet(input_shape=(64, 128, 64, 1),
 
 # MODEL 3: ATTENTION
 
-def buildAttnNN(input_shape=(64,128,64,1),
-                activation='sigmoid', n_classes=1, 
+def buildAttnNN(input_shape=(64, 128, 64, 1),
+                activation='sigmoid', n_classes=1,
                 name='Attention'):
+    """
+    Build an attention-augmented ResNet model with SE and spatial attention.
+
+    Architecture: Conv3D stem → SE residual blocks → spatial attention → GAP3D → Dense.
+
+    Parameters
+    ----------
+    input_shape : tuple
+        Input volume shape. Default: (64, 128, 64, 1).
+    activation : str
+        Output activation function.
+    n_classes : int
+        Output units. Forced to 1 for sigmoid.
+    name : str
+        Model name.
+
+    Returns
+    -------
+    keras.Model
+    """
     
     if activation == 'sigmoid':
         n_classes = 1
