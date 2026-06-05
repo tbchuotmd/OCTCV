@@ -81,118 +81,145 @@ class EpochProgressBar(tf.keras.callbacks.Callback):
         sys.stdout.flush()
 
 class LivePlot(tf.keras.callbacks.Callback):
-    
-    def __init__(self,metrics_to_plot='all'):
+    """
+    Real-time training visualization in Jupyter notebooks.
+
+    Shows two panels:
+    - Left: Epoch-level metrics (AUC, val_AUC, etc.) updated after each epoch
+    - Right: Intra-epoch batch loss/accuracy updated every ~1 second
+
+    Parameters
+    ----------
+    metrics_to_plot : list of str or 'all'
+        Which epoch-level metrics to plot. Default: 'all'.
+    update_interval : float
+        Minimum seconds between intra-epoch plot refreshes. Default: 1.0.
+    """
+
+    def __init__(self, metrics_to_plot='all', update_interval=1.0):
+        super().__init__()
+        self.metrics_to_plot = metrics_to_plot
+        self.update_interval = update_interval
+
+        # Epoch-level data
         self.epoch_numbers = []
         self.metric_scores = {}
-        self.metrics_to_plot = metrics_to_plot
         self.epoch_durations = []
         self.total_elapsed_time = 0
-    def plot_epoch_data(self,
-                        epoch_numbers:list,
-                        metric_scores:dict,
-                        epoch_durations:list):
-        
-        fig, ax = plt.subplots(figsize=(8,3.5))
-        
-        if self.metrics_to_plot == 'all':
-            metrics_to_plot = metric_scores.keys()
-        else:
-            metrics_to_plot = self.metrics_to_plot
 
-        for metric,scores in metric_scores.items():
-            if metric in metrics_to_plot:
-                metric_split = metric.split('_')
-                if len(metric_split) > 1:
-                    last = metric_split[-1]
-                    first = metric_split[0]
-                    metricf = f'{first.title()} {last.upper()}'
-                else:
-                    metricf = metric.upper()
+        # Intra-epoch (batch-level) data
+        self._batch_losses = []
+        self._batch_accs = []
+        self._batch_steps = []
+        self._last_draw_time = 0
+        self._epoch_start_time = None
+        self._current_epoch = 0
+        self._total_steps = 0
 
-                ax.plot(epoch_numbers, scores, 
-                        marker='o', markersize=5,
-                        alpha=0.6, 
-                        label=metricf)
-        
-        plt.grid(True)
-        ax.set_ylim(0,1)
-        ax.set_yticks(np.linspace(0,1,9))
-        # ax.set_xticks( np.arange(1,self.params['epochs'] + 1) )
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.set_xlabel('Epoch', fontsize=13)
-        ax.set_ylabel('Score', fontsize=13)
-        ax.set_title('Training Metrics', fontsize=15)
-        handles, labels = ax.get_legend_handles_labels()
+    def on_train_begin(self, logs=None):
+        self._total_steps = self.params.get('steps', 0)
 
-        if labels:
-            ax.legend(
-                bbox_to_anchor=(1.05, 1), loc='upper left', 
-                borderaxespad=0.5
-            )
-            
-            if epoch_durations:
-                ept = ftime(epoch_durations[-1],use_abbreviated_units=True)
-            else:
-                ept = 'N/A'
-            ax.text(
-                1.05,0.3,
-                s = f"Epoch #{epoch_numbers[-1]}\nDuration: {ept}\nTraining AUC:    {metric_scores['auc'][-1]:.4f}\nValidation AUC: {metric_scores['val_auc'][-1]:.4f}",
-                transform=ax.transAxes, 
-                ha='left', va='center',
-                bbox=dict(facecolor='black', 
-                              alpha=0.9, 
-                              edgecolor='black', 
-                              lw=0.5,
-                              boxstyle='round,pad=0.3'),
-                fontdict={'color': 'white', 
-                              'weight': 'bold', 
-                              'size': 10}
-            )
+    def on_epoch_begin(self, epoch, logs=None):
+        self._epoch_start_time = time.time()
+        self._current_epoch = epoch + 1
+        self._batch_losses = []
+        self._batch_accs = []
+        self._batch_steps = []
+        self._last_draw_time = 0
 
-            ttt = ftime(self.total_elapsed_time,use_abbreviated_units=True)
-            ax.text(
-                1.05,0.6,
-                s = f"Total Training Time\n{ttt}",
-                transform=ax.transAxes, 
-                ha='left', va='center',
-                bbox=dict(facecolor='black', 
-                              alpha=0.9, 
-                              edgecolor='black', 
-                              lw=0.5,
-                              boxstyle='round,pad=0.3'),
-                fontdict={'color': 'white', 
-                              'weight': 'bold', 
-                              'size': 10}
-            )
-        plt.show()
-        
+    def on_batch_end(self, batch, logs=None):
+        self._batch_steps.append(batch + 1)
+        self._batch_losses.append(logs.get('loss', 0))
+        self._batch_accs.append(logs.get('auc', logs.get('accuracy', 0)))
 
-    # def on_train_begin(self,logs=None):
-        
-    def on_epoch_begin(self, epoch, logs = None):
-        self.start_time = datetime.now()
-        if epoch == 0:
-            self.plot_epoch_data(self.epoch_numbers, 
-                                self.metric_scores,
-                                self.epoch_durations)
+        now = time.time()
+        if now - self._last_draw_time >= self.update_interval:
+            self._last_draw_time = now
+            self._draw()
 
-    def on_epoch_end(self,epoch,logs=None):
-        for metric,score in logs.items():
-            if metric not in self.metric_scores.keys():
+    def on_epoch_end(self, epoch, logs=None):
+        # Record epoch-level metrics
+        for metric, score in logs.items():
+            if metric not in self.metric_scores:
                 self.metric_scores[metric] = []
             self.metric_scores[metric].append(score)
-        self.epoch_numbers.append(int(epoch)+1)
+        self.epoch_numbers.append(int(epoch) + 1)
 
-        # update training time
-        self.end_time = datetime.now()
-        self.epoch_durations.append((self.end_time - self.start_time).total_seconds())
+        # Timing
+        duration = time.time() - self._epoch_start_time
+        self.epoch_durations.append(duration)
         self.total_elapsed_time = sum(self.epoch_durations)
-        
+
+        # Final draw for this epoch
+        self._draw()
+
+    def _draw(self):
+        """Render the combined plot (epoch metrics + intra-epoch progress)."""
         clear_output(wait=True)
-        self.plot_epoch_data(self.epoch_numbers, 
-                             self.metric_scores,
-                             self.epoch_durations)
+
+        has_epoch_data = len(self.epoch_numbers) > 0
+        fig, axes = plt.subplots(1, 2, figsize=(14, 4),
+                                 gridspec_kw={'width_ratios': [3, 2]})
+        ax_epoch, ax_batch = axes
+
+        # --- LEFT PANEL: Epoch-level metrics ---
+        if has_epoch_data:
+            plot_metrics = (self.metric_scores.keys() if self.metrics_to_plot == 'all'
+                           else self.metrics_to_plot)
+            for metric, scores in self.metric_scores.items():
+                if metric in plot_metrics:
+                    parts = metric.split('_')
+                    label = f"{'Val ' if parts[0]=='val' else ''}{parts[-1].upper()}"
+                    style = '--' if 'val' in metric else '-'
+                    ax_epoch.plot(self.epoch_numbers, scores,
+                                 marker='o', markersize=4, linestyle=style,
+                                 alpha=0.8, label=label)
+            ax_epoch.set_ylim(0, 1)
+            ax_epoch.set_xlabel('Epoch')
+            ax_epoch.set_ylabel('Score')
+            ax_epoch.set_title('Epoch Metrics')
+            ax_epoch.legend(fontsize=8, loc='lower right')
+            ax_epoch.grid(True, alpha=0.3)
+            ax_epoch.xaxis.set_major_locator(MaxNLocator(integer=True))
+        else:
+            ax_epoch.text(0.5, 0.5, 'Waiting for first epoch...',
+                         ha='center', va='center', fontsize=12, color='gray')
+            ax_epoch.set_title('Epoch Metrics')
+
+        # --- RIGHT PANEL: Intra-epoch batch progress ---
+        if self._batch_steps:
+            ax_batch.plot(self._batch_steps, self._batch_losses,
+                         color='#e74c3c', alpha=0.7, linewidth=1, label='Loss')
+            ax_batch_twin = ax_batch.twinx()
+            ax_batch_twin.plot(self._batch_steps, self._batch_accs,
+                              color='#2ecc71', alpha=0.7, linewidth=1, label='AUC/Acc')
+            ax_batch_twin.set_ylim(0, 1)
+            ax_batch_twin.set_ylabel('AUC/Acc', color='#2ecc71', fontsize=9)
+            ax_batch_twin.tick_params(axis='y', labelcolor='#2ecc71')
+
+            ax_batch.set_xlabel(f'Batch (Epoch {self._current_epoch})')
+            ax_batch.set_ylabel('Loss', color='#e74c3c', fontsize=9)
+            ax_batch.tick_params(axis='y', labelcolor='#e74c3c')
+            ax_batch.set_title(f'Epoch {self._current_epoch} Progress')
+
+            # Progress info
+            elapsed = time.time() - self._epoch_start_time
+            pct = (self._batch_steps[-1] / self._total_steps * 100) if self._total_steps else 0
+            info = f"{self._batch_steps[-1]}/{self._total_steps} ({pct:.0f}%) - {elapsed:.0f}s"
+            ax_batch.text(0.5, 1.02, info, transform=ax_batch.transAxes,
+                         ha='center', fontsize=9, color='gray')
+        else:
+            ax_batch.text(0.5, 0.5, 'Starting...', ha='center', va='center',
+                         fontsize=12, color='gray')
+            ax_batch.set_title('Batch Progress')
+
+        # --- Footer info ---
+        ttt = ftime(self.total_elapsed_time, use_abbreviated_units=True) if self.total_elapsed_time else '0s'
+        fig.suptitle(f'Total Training Time: {ttt}', fontsize=10, color='gray', y=0.02)
+
+        plt.tight_layout()
+        plt.subplots_adjust(bottom=0.12)
+        plt.show()
 
 class LiveCapture(tf.keras.callbacks.Callback):
     def __init__(self, show_every='epoch'):
