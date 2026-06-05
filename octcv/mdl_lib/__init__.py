@@ -244,7 +244,7 @@ class XVolSet:
         stacked = np.stack(arrays, axis=0)
         return stacked[..., np.newaxis]
 
-    def iter_batches(self, y, batch_size=4):
+    def iter_batches(self, y, batch_size=4, normalize=True):
         """
         Yield (X_batch, y_batch) tuples, loading only batch_size volumes at a time.
 
@@ -254,6 +254,8 @@ class XVolSet:
             Labels array of shape (N, ...).
         batch_size : int
             Number of volumes per batch.
+        normalize : bool
+            If True, scale pixel values to [0, 1] by dividing by 255.
 
         Yields
         ------
@@ -267,10 +269,12 @@ class XVolSet:
             batch_paths = paths.iloc[i:end].values
             X_batch = np.stack([vizInputParser(p) for p in batch_paths], axis=0)
             X_batch = X_batch[..., np.newaxis].astype(np.float32)
+            if normalize:
+                X_batch = X_batch / 255.0
             y_batch = y[i:end].astype(np.float32)
             yield X_batch, y_batch
 
-    def to_tf_dataset(self, y, batch_size=4):
+    def to_tf_dataset(self, y, batch_size=4, shuffle=True, normalize=True):
         """
         Convert to a tf.data.Dataset that yields (X_batch, y_batch).
 
@@ -282,6 +286,10 @@ class XVolSet:
             Labels of shape (N, ...).
         batch_size : int
             Volumes per batch.
+        shuffle : bool
+            If True, shuffle the dataset each epoch. Recommended for training.
+        normalize : bool
+            If True, scale pixel values to [0, 1] by dividing by 255.
 
         Returns
         -------
@@ -291,7 +299,7 @@ class XVolSet:
         label_shape = y[0].shape if y.ndim > 1 else ()
 
         def gen():
-            yield from self.iter_batches(y, batch_size)
+            yield from self.iter_batches(y, batch_size, normalize=normalize)
 
         ds = tf.data.Dataset.from_generator(
             gen,
@@ -301,6 +309,8 @@ class XVolSet:
                 tf.TensorSpec(shape=(None,), dtype=tf.float32)
             )
         )
+        if shuffle:
+            ds = ds.shuffle(buffer_size=min(len(self) // batch_size, 500), reshuffle_each_iteration=True)
         return ds.prefetch(tf.data.AUTOTUNE)
 
     def describe(self):
