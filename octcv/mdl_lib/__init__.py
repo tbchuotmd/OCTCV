@@ -23,6 +23,11 @@ from matplotlib.colors import ListedColormap
 from matplotlib import font_manager
 from matplotlib.ticker import MaxNLocator
 
+import cv2
+from PIL import Image
+import base64
+from io import BytesIO
+
 from sklearn.metrics import (roc_curve, roc_auc_score, confusion_matrix,
                              ConfusionMatrixDisplay, classification_report)
 
@@ -54,6 +59,87 @@ def describe_array(array):
     cols = ["min", "mean", "median", "max", "std", "sum"]
     vals = [array.min(), array.mean(), np.median(array), array.max(), array.std(), array.sum()]
     return pd.DataFrame([vals], columns=cols)
+
+
+def describeArrayHTML(array, title='', output='return', tblwidth=None):
+    """
+    Render array summary stats as a styled HTML table.
+
+    Parameters
+    ----------
+    array : np.ndarray
+    title : str, optional
+    output : str
+        'return'/'html' to return HTML string, 'disp' to display inline.
+    tblwidth : int or None
+        Table width percentage.
+
+    Returns
+    -------
+    str or None
+    """
+    floatFormatter = lambda x: str(round(x, 2)) if round(x) - x != 0 else f"{int(x):,d}"
+    tid = np.random.randint(0, int(1e5))
+
+    html = describe_array(array).to_html(
+        index=False, border=0, justify='center',
+        float_format=floatFormatter, table_id=tid
+    )
+
+    if tblwidth is None:
+        tblwidth = 100 if title else 50
+
+    styleTag = f"""
+    <style>
+      .dataframe[id="{tid}"] {{ border-collapse: collapse; margin: 0; width: {tblwidth}%; }}
+      .dataframe td, .dataframe th {{ text-align: center !important; padding: 8px; }}
+      .dataframe th {{ color: #29313d; background-color: #e0dfff; border: 1px solid #5c6e89 !important; }}
+      .dataframe td {{ color: black; background-color: white; border: 1px solid #96D4D4 !important; }}
+    </style>
+    """
+
+    elements = [styleTag]
+    if title:
+        elements.append(f'<div style="background:#585880;color:white;padding:8px;font-weight:bold;text-align:center;border-radius:6px 6px 0 0;">{title}</div>')
+    elements.append(html)
+
+    htmlContent = '\n'.join(elements)
+
+    if output in ('html', 'return'):
+        return htmlContent
+    else:
+        display(HTML(htmlContent))
+
+
+def numpy_to_html_img(arr, cmap_name='viridis', width='40%'):
+    """Convert a 2D numpy array to an inline HTML <img> tag (base64 PNG)."""
+    if arr.dtype != np.uint8:
+        arr = arr.astype(np.uint8)
+    sm = plt.get_cmap(cmap_name)
+    rgba_array = sm(arr)
+    rgba_uint8 = (rgba_array * 255).astype(np.uint8)
+    img = Image.fromarray(rgba_uint8)
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    width = width if isinstance(width, str) else str(width) + 'px'
+    return f'<img src="data:image/png;base64,{img_str}" style="width:{width}; height:auto;" />'
+
+
+def imgStatsCompare(images, titles=('Original', 'Noisy')):
+    """Display side-by-side image comparison with stats tables (HTML in Jupyter)."""
+    cdiv = lambda innerHTML: f'<div style="text-align: center;">{innerHTML}</div>'
+    itagL = cdiv(numpy_to_html_img(images[0]))
+    itagR = cdiv(numpy_to_html_img(images[1]))
+    tabL = cdiv(describeArrayHTML(images[0], title=titles[0], output='html', tblwidth=100))
+    tabR = cdiv(describeArrayHTML(images[1], title=titles[1], output='html', tblwidth=100))
+    html = f"""
+    <table style="width: 100%; max-width: 800px; text-align: center;">
+      <tr><td>{tabL}</td><td>{tabR}</td></tr>
+      <tr><td>{itagL}</td><td>{itagR}</td></tr>
+    </table>
+    """
+    display(HTML(html))
 
 
 def MinMaxScaleNDArray(array, value_range=(0, 255)):
