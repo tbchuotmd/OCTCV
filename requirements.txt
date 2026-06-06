@@ -1,19 +1,37 @@
-ipykernel == 6.29.5
-jupyterlab == 4.4.3
-keras == 3.10.0
-matplotlib == 3.9.2
-matplotlib-inline == 0.1.6
-notebook == 7.4.3
-numpy == 1.26.4
-opencv-python == 4.10.0.84
-pandas == 2.2.3
-requests == 2.32.4
-scikit-learn == 1.5.1
-tensorflow == 2.19.0
-mimetypes-magic == 0.4.30
-num2words == 0.5.14
-visualkeras == 0.2.0
+# OCTCV — Python 3.12.11
+# Core ML / DL
+tensorflow==2.19.0
+keras==3.10.0
+scikit-learn==1.5.1
 
-# NOTE: These are the versions used during development.
-# Other versions may work but are untested.
+# Data handling
+numpy==1.26.4
+pandas==2.2.3
 
+# Visualization
+matplotlib==3.9.2
+matplotlib-inline==0.1.6
+plotly==5.24.1
+visualkeras==0.2.0
+
+# Image processing
+opencv-python==4.10.0.84
+Pillow==11.1.0
+
+# Jupyter
+ipykernel==6.29.5
+jupyterlab==4.4.3
+notebook==7.4.3
+
+# System / utilities
+psutil==6.1.1
+mimetypes-magic==0.4.30
+
+# Misc
+requests==2.32.4
+num2words==0.5.14
+
+# NOTE: These are the versions used during development on Ubuntu 24.04 (GPU)
+# and Windows 11 (CPU-only editing). Other versions may work but are untested.
+# For GPU support, ensure CUDA/cuDNN are installed per TensorFlow's guide:
+# https://www.tensorflow.org/install/pip
