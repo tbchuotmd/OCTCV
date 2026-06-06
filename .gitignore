@@ -8,3 +8,5 @@ requirements_draft.txt
 icons/
 *.html
 .ipynb_checkpoints/
+__pycache__/
+*.pyc

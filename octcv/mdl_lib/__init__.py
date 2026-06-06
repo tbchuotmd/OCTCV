@@ -683,6 +683,118 @@ class ModelEvaluator:
 
 
 # =============================================================================
+# LEGACY MODEL EVALUATOR (Part 1 compatibility shim)
+# =============================================================================
+
+class ModelEvaluatorLegacy:
+    """
+    Legacy ModelEvaluator that supports the Part 1 API.
+
+    Accepts DataFrames for train/valid/eval sets, handles yX_split internally,
+    and provides train_and_evaluate() and vkPlotArchitecture().
+
+    This class is NOT used directly — it's instantiated automatically by
+    ModelEvaluator when it detects old-style positional arguments.
+    """
+
+    def __init__(self, model, train_set=None, validation_set=None,
+                 test_set=None, model_name=None):
+        self.model = model
+        self.model_name = model_name or model.name
+        self._train_df = train_set
+        self._valid_df = validation_set
+        self._test_df = test_set
+
+    def vkPlotArchitecture(self):
+        """Plot model architecture using visualkeras (if available)."""
+        try:
+            import visualkeras
+            return visualkeras.layered_view(self.model, legend=True)
+        except ImportError:
+            print("visualkeras not installed. Falling back to model.summary().")
+            self.model.summary()
+
+    def train_and_evaluate(self, batch_size=4, verbose=1,
+                           save_performance_metrics=False, epochs=100,
+                           patience=8, learning_rate=1e-4):
+        """
+        Train the model and evaluate on the test set (legacy workflow).
+
+        Splits DataFrames via yX_split, creates tf.data.Datasets,
+        trains with train_model(), then runs ModelEvaluator.summary().
+        """
+        # Split datasets
+        _, y_train, X_train = yX_split(self._train_df)
+        _, y_valid, X_valid = yX_split(self._valid_df)
+        _, y_eval, X_eval = yX_split(self._test_df)
+
+        # Create tf.data.Datasets
+        train_ds = X_train.to_tf_dataset(y_train.flatten(), batch_size=batch_size,
+                                         shuffle=True, normalize=True)
+        valid_ds = X_valid.to_tf_dataset(y_valid.flatten(), batch_size=batch_size,
+                                         shuffle=False, normalize=True)
+        eval_ds = X_eval.to_tf_dataset(y_eval.flatten(), batch_size=batch_size,
+                                       shuffle=False, normalize=True)
+
+        # Train
+        history = train_model(
+            self.model, train_ds, valid_ds,
+            learning_rate=learning_rate,
+            patience=patience,
+            epochs=epochs,
+            verbose=verbose
+        )
+
+        # Evaluate
+        evaluator = ModelEvaluator(self.model, history, eval_ds)
+        evaluator.summary()
+
+        self.history = history
+        self.evaluator = evaluator
+
+
+# Monkey-patch ModelEvaluator.__init__ to detect legacy calls
+_OriginalModelEvaluator = ModelEvaluator
+
+
+class ModelEvaluator(_OriginalModelEvaluator):
+    """
+    ModelEvaluator with backwards-compatible legacy detection.
+
+    New API (Part 2):
+        ModelEvaluator(model, history, eval_dataset)
+
+    Legacy API (Part 1):
+        ModelEvaluator(model, train_df, valid_df, eval_df)
+        ModelEvaluator(model, train_set=..., validation_set=..., test_set=...)
+    """
+
+    def __new__(cls, model, *args, **kwargs):
+        # Detect legacy usage: second positional arg is a DataFrame
+        if args and isinstance(args[0], pd.DataFrame):
+            train_df = args[0]
+            valid_df = args[1] if len(args) > 1 else kwargs.get('validation_set')
+            eval_df = args[2] if len(args) > 2 else kwargs.get('test_set')
+            model_name = kwargs.get('model_name')
+            return ModelEvaluatorLegacy(
+                model, train_set=train_df,
+                validation_set=valid_df, test_set=eval_df,
+                model_name=model_name
+            )
+        # Keyword-only legacy usage
+        if 'train_set' in kwargs or 'validation_set' in kwargs or 'test_set' in kwargs:
+            return ModelEvaluatorLegacy(
+                model,
+                train_set=kwargs.get('train_set'),
+                validation_set=kwargs.get('validation_set'),
+                test_set=kwargs.get('test_set'),
+                model_name=kwargs.get('model_name')
+            )
+        # New API — proceed normally
+        return super().__new__(cls)
+
+
+# =============================================================================
 # CONFUSION MATRIX PLOTTING (STANDALONE)
 # =============================================================================
 
