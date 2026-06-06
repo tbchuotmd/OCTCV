@@ -66,7 +66,7 @@ The EDA phase focused specifically on understanding the dataset's characteristic
 
 ## 3. Preprocessing
 
-*Notebook: `Preprocessing.ipynb`*
+*Notebook: `pps-modeling.ipynb` (Part I)*
 
 ### 3.1 Augmentation Pipeline
 
@@ -105,7 +105,7 @@ Five physics-informed augmentation strategies were applied to all 1,110 volumes:
 
 ## 4. Modeling
 
-*Notebook: `Modeling.ipynb`*
+*Notebook: `pps-modeling.ipynb` (Part II)*
 
 ### 4.1 Model Architectures
 
@@ -253,10 +253,10 @@ For deployment as a clinical screening tool:
 
 ```
 PART_2/
-├── DW-EDA.ipynb                    # Step 1: Data wrangling & exploratory analysis
-├── Preprocessing.ipynb             # Step 2: Augmentation pipeline (1,110 → 6,660 volumes)
-├── Modeling.ipynb                  # Step 3: Training, evaluation, comparison
+├── DW-EDA.ipynb                    # Data wrangling & exploratory analysis
+├── pps-modeling.ipynb              # Preprocessing (Part I) + Modeling (Part II)
 ├── Capstone-Three_Final_Report.md  # This report
+├── Capstone-Three_Presentation.pptx# Slide deck
 ├── capstone_three_-_project_ideas.pdf
 ├── capstone_three_-_project_proposal.pdf
 └── [EDA visualization outputs]
