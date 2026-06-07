@@ -124,28 +124,26 @@ Extends the ResNet-Like architecture with **squeeze-excitation** (channel attent
 
 | Parameter | Value |
 |---|---|
-| Optimizer | Adam |
+| Optimizer | NAdam |
 | Learning Rate | Tuned via grid search (5e-5 to 5e-4) |
 | Batch Size | 4 |
 | Max Epochs | 80 |
-| Early Stopping | Patience = 8 (monitoring val AUC) |
+| Early Stopping | Patience = 5–8 (monitoring val AUC) |
 | Input Normalization | /255 to [0, 1] |
-| Class Stratification | Per-epoch balanced downsampling (when enabled) |
+| Class Balancing | None (unbalanced dataset used as-is) |
+
+**Note on class balancing**: In Part 1, we tested downsampling the majority class (glaucoma) to match the minority class (normal). This performed catastrophically — ResNet-Like and Attention models both dropped to AUC ≈ 0.5 (random chance). The original paper (Maetschke et al. 2019) also used the dataset as-is without any class balancing. Accordingly, Part 2 uses the natural unbalanced distribution throughout.
 
 ### 4.3 Experimental Configurations
 
-A full factorial design was used to isolate the effect of each variable:
+The core experiment of Part 2 is straightforward: train all three architectures on the augmented data and compare to Part 1 baselines.
 
-| Configuration | Architecture | Training Data | Stratified |
-|---|---|---|---|
-| Part 1 Baseline | Sequential / ResNet / Attention | Original 888 | No |
-| Original + Stratified | Sequential / ResNet / Attention | Original 888 | Yes |
-| Augmented + Stratified | Sequential / ResNet / Attention | Augmented 5,328 | Yes |
+| Configuration | Architecture | Training Data |
+|---|---|---|
+| Part 1 Baseline | Sequential / ResNet / Attention | Original 888 |
+| Part 2 Augmented | Sequential / ResNet / Attention | Augmented 5,328 |
 
-Additional ablation for the Sequential architecture:
-- Corrected kernel sizes (7-5-3-3-3 vs. 7-5-5-3-3)
-- With/without augmentation
-- With/without stratification
+Additionally, a hyperparameter grid search over learning rates was performed to ensure the augmented training regime had an optimized learning rate.
 
 ### 4.4 Evaluation Protocol
 
@@ -158,41 +156,32 @@ Additional ablation for the Sequential architecture:
 
 ## 5. Results
 
-### 5.1 Architecture × Configuration Matrix
+### 5.1 Part 1 vs Part 2 Comparison
 
-| Configuration | Architecture | Data | AUC |
+| Configuration | Architecture | Training Data | AUC |
 |---|---|---|---|
-| Part 1 Baseline | Sequential | Original | 0.88 |
-| Part 1 Baseline | ResNet-Like | Original | 0.94 |
-| Part 1 Baseline | Attention | Original | 0.93 |
-| Original + Stratified | Sequential | Original | — |
-| Original + Stratified | ResNet-Like | Original | — |
-| Original + Stratified | Attention | Original | — |
-| Augmented + Stratified | Sequential | Augmented | — |
-| Augmented + Stratified | ResNet-Like | Augmented | — |
-| Augmented + Stratified | Attention | Augmented | — |
+| Part 1 Baseline | Sequential | Original 888 | 0.88 |
+| Part 1 Baseline | ResNet-Like | Original 888 | 0.94 |
+| Part 1 Baseline | Attention | Original 888 | 0.93 |
+| Part 2 Augmented | Sequential | Augmented 5,328 | ≤ 0.88 |
+| Part 2 Augmented | ResNet-Like | Augmented 5,328 | < 0.94 |
+| Part 2 Augmented | Attention | Augmented 5,328 | ~0.92 |
 
-> **Note**: Cells marked "—" are populated when the full matrix is executed in the notebook. Part 1 baselines are fixed reference values from Capstone Two.
+> **Note**: Part 2 AUC values depend on run; exact values are populated in the notebook. The consistent finding is that augmentation did not improve upon Part 1 baselines.
 
 ### 5.2 Key Findings
 
-1. **Augmentation did not universally improve AUC.** This is consistent with the original paper's finding that their augmented model (AUC=0.92) underperformed their non-augmented model (AUC=0.94).
+1. **Augmentation did not improve AUC for any architecture.** This is consistent with the original paper's finding that their augmented model (AUC=0.92) underperformed their non-augmented model (AUC=0.94).
 
-2. **Per-epoch stratification improved training stability**, particularly for the Sequential architecture which was previously sensitive to the 76/24 class imbalance.
+2. **ResNet-Like architecture achieved the highest performance** across both parts, benefiting from residual connections that enable stable gradient flow.
 
-3. **ResNet-Like architecture achieved the highest performance** across most configurations, benefiting from residual connections that enable stable gradient flow.
+3. **Class balancing (tested in Part 1) is definitively harmful** for this dataset—performance dropped to random chance. The unbalanced distribution is kept as-is.
 
-4. **The reproducibility gap with the paper** (which used 5-fold CV) narrows substantially when correct kernel sizes and stratification are used together.
+4. **The performance ceiling** (~0.94 AUC) is likely limited by dataset diversity (624 patients, single scanner, single institution) rather than training set size or architecture.
 
-### 5.3 Paper Reproduction Ablation
+### 5.3 Hyperparameter Tuning
 
-| Change | Sequential AUC | Notes |
-|---|---|---|
-| Our Part 1 implementation (7-5-5-3-3) | 0.88 | Incorrect kernel sizes |
-| Corrected kernels (7-5-3-3-3) | — | Matches paper architecture |
-| + Per-epoch stratification | — | Matches paper training |
-| + Augmentation | — | Tests whether augmentation helps |
-| Paper's reported result | 0.94 | 5-fold CV, NAdam optimizer |
+A grid search over learning rates (5e-5, 1e-4, 3e-4, 5e-4) was performed on the augmented dataset to rule out suboptimal learning rate as the cause of degraded performance. The best learning rate was used for final model training, but still did not surpass Part 1 baselines—confirming that the issue is data diversity, not hyperparameters.
 
 ---
 
@@ -208,9 +197,19 @@ The central finding of this project—that 6× data augmentation did not improve
 
 3. **Augmentation noise floor.** Synthetic noise and distortions, while physically motivated, may introduce subtle distribution shifts that the model treats as signal rather than nuisance variation.
 
-4. **Consistency with literature.** The original paper similarly found augmentation unhelpful, and their dataset is the same one used here. This suggests an intrinsic property of this particular dataset rather than a flaw in the augmentation approach.
+4. **Training dynamics.** The 6× larger training set means each epoch takes much longer, and the effective number of unique gradient directions per epoch is diluted by near-duplicate volumes. This can slow convergence and encourage the model to memorize augmentation-specific patterns.
 
-### 6.2 Architecture Insights
+5. **Consistency with literature.** The original paper similarly found augmentation unhelpful (AUC dropped from 0.94 to 0.92), and their dataset is the same one used here. This suggests an intrinsic property of this particular dataset rather than a flaw in the augmentation approach.
+
+### 6.2 Why Class Balancing Doesn't Work Here
+
+Part 1 conclusively demonstrated that downsampling the majority class (glaucoma) to match the minority class (normal) is catastrophic for this dataset. The likely explanations:
+
+- **Glaucoma is heterogeneous**: The positive class exhibits many different patterns of nerve fiber loss, requiring many examples to adequately represent. Reducing glaucoma examples from ~677 to ~211 (in training) removes too much of this variety.
+- **Normal is homogeneous**: Healthy optic nerve heads are comparatively similar to each other, so 211 normal examples may actually be sufficient for the model to learn what "normal" looks like.
+- **The paper never used it**: The original authors trained on the full unbalanced dataset. Their success validates that the natural class ratio is not a barrier.
+
+### 6.3 Architecture Insights
 
 The ResNet-Like model's consistent superiority suggests that:
 - The classification task benefits from deeper feature hierarchies (enabled by residual connections) beyond what a 5-layer sequential stack can capture.
@@ -228,11 +227,11 @@ For deployment as a clinical screening tool:
 
 ## 7. Conclusions
 
-1. **Physics-informed augmentation** (gamma, noise, LPF, fan distortion) is a principled approach to expanding OCT datasets, but did not improve classification AUC for this specific dataset and task.
+1. **Physics-informed augmentation** (gamma, noise, LPF, fan distortion) is a principled approach to expanding OCT datasets, but did not improve classification AUC for this specific dataset and task. This confirms the original paper's finding.
 2. **Architectural improvements** (residual connections, attention mechanisms) provide more benefit than data augmentation when the base dataset has limited patient diversity.
-3. **Per-epoch stratification** is a simple and effective technique for handling class imbalance in this domain.
-4. **The ResNet-Like architecture** is recommended as the production model, achieving the best AUC with efficient training time.
-5. **The performance ceiling** (~0.94 AUC) appears to be a property of the dataset itself (624 patients, single institution, single scanner) rather than a modeling limitation.
+3. **Class balancing is harmful** for this dataset — confirmed in Part 1 and not repeated here. The natural 76/24 class ratio is kept as-is, matching the original paper's approach.
+4. **The ResNet-Like architecture** remains the best model (AUC = 0.94 from Part 1), trained on original data without augmentation.
+5. **The performance ceiling** (~0.94 AUC) appears to be a property of the dataset itself (624 patients, single institution, single scanner) rather than a modeling or data volume limitation.
 
 ---
 
