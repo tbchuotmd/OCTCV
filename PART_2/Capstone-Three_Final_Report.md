@@ -138,9 +138,6 @@ Extends the ResNet-Like architecture with **squeeze-excitation** (channel attent
 | Max Epochs | 80 |
 | Early Stopping | Patience = 5–8 (monitoring val AUC) |
 | Input Normalization | /255 to [0, 1] |
-| Class Balancing | None (unbalanced dataset used as-is) |
-
-**Note on class balancing**: In Part 1, we tested downsampling the majority class (glaucoma) to match the minority class (normal). This performed catastrophically — ResNet-Like and Attention models both dropped to AUC ≈ 0.5 (random chance). The original paper (Maetschke et al. 2019) also used the dataset as-is without any class balancing. Accordingly, Part 2 uses the natural unbalanced distribution throughout.
 
 ### 4.3 Experimental Configurations
 
@@ -185,9 +182,7 @@ Additionally, a hyperparameter grid search over learning rates was performed to 
 
 2. **ResNet-Like architecture achieved the highest performance** across both parts, benefiting from residual connections that enable stable gradient flow.
 
-3. **Class balancing (tested in Part 1) is definitively harmful** for this dataset—performance dropped to random chance. The unbalanced distribution is kept as-is.
-
-4. **The performance ceiling** (~0.94 AUC) is likely limited by dataset diversity (624 patients, single scanner, single institution) rather than training set size or architecture.
+3. **The performance ceiling** (~0.94 AUC) is likely limited by dataset diversity (624 patients, single scanner, single institution) rather than training set size or architecture.
 
 ### 5.3 Hyperparameter Tuning
 
@@ -211,15 +206,7 @@ The central finding of this project—that 6× data augmentation did not improve
 
 5. **Consistency with literature.** The original paper similarly found augmentation unhelpful (AUC dropped from 0.94 to 0.92), and their dataset is the same one used here. This suggests an intrinsic property of this particular dataset rather than a flaw in the augmentation approach.
 
-### 6.2 Why Class Balancing Doesn't Work Here
-
-Part 1 conclusively demonstrated that downsampling the majority class (glaucoma) to match the minority class (normal) is catastrophic for this dataset. The likely explanations:
-
-- **Glaucoma is heterogeneous**: The positive class exhibits many different patterns of nerve fiber loss, requiring many examples to adequately represent. Reducing glaucoma examples from ~677 to ~211 (in training) removes too much of this variety.
-- **Normal is homogeneous**: Healthy optic nerve heads are comparatively similar to each other, so 211 normal examples may actually be sufficient for the model to learn what "normal" looks like.
-- **The paper never used it**: The original authors trained on the full unbalanced dataset. Their success validates that the natural class ratio is not a barrier.
-
-### 6.3 Architecture Insights
+### 6.2 Architecture Insights
 
 The ResNet-Like model's consistent superiority suggests that:
 - The classification task benefits from deeper feature hierarchies (enabled by residual connections) beyond what a 5-layer sequential stack can capture.
@@ -229,7 +216,7 @@ The ResNet-Like model's consistent superiority suggests that:
 ### 6.3 Practical Implications
 
 For deployment as a clinical screening tool:
-- The **ResNet-Like model trained on original data with stratification** offers the best performance-to-complexity ratio.
+- The **ResNet-Like model trained on original data** offers the best performance-to-complexity ratio.
 - The model could serve as a triage system, flagging high-probability scans for ophthalmologist review.
 - Inference is fast (single forward pass through a relatively shallow 3D CNN), making it suitable for point-of-care deployment.
 
@@ -241,9 +228,8 @@ For deployment as a clinical screening tool:
 
 1. **Physics-informed augmentation** (gamma, noise, LPF, fan distortion) is a principled approach to expanding OCT datasets, but did not improve classification AUC for this specific dataset and task. This confirms the original paper's finding.
 2. **Architectural improvements** (residual connections, attention mechanisms) provide more benefit than data augmentation when the base dataset has limited patient diversity.
-3. **Class balancing is harmful** for this dataset — confirmed in Part 1 and not repeated here. The natural 76/24 class ratio is kept as-is, matching the original paper's approach.
-4. **The ResNet-Like architecture** remains the best model (AUC = 0.94 from Part 1), trained on original data without augmentation.
-5. **The performance ceiling** (~0.94 AUC) appears to be a property of the dataset itself (624 patients, single institution, single scanner) rather than a modeling or data volume limitation.
+3. **The ResNet-Like architecture** remains the best model (AUC = 0.94 from Part 1), trained on original data without augmentation.
+4. **The performance ceiling** (~0.94 AUC) appears to be a property of the dataset itself (624 patients, single institution, single scanner) rather than a modeling or data volume limitation.
 
 ---
 
