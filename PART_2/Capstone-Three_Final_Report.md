@@ -48,14 +48,20 @@ The EDA phase focused specifically on understanding the dataset's characteristic
 - Found high intra-class similarity (SSIM > 0.8), confirming that OCT volumes from the same diagnostic class share substantial structural features.
 - The narrow SSIM distribution suggested conservative augmentation parameters would be appropriate to avoid pushing augmented volumes outside the natural data manifold.
 
+![SSIM Boxplot](ssim_boxplot.png)
+
 #### Radial Power Spectrum Analysis
 - Compared frequency-domain characteristics between Normal and Glaucoma classes.
 - Found that glaucomatous changes manifest primarily in mid-frequency spatial features (corresponding to retinal nerve fiber layer thinning), while low-frequency structure (overall scan geometry) and high-frequency content (speckle/noise) are similar across classes.
 - This informed the LPF augmentation radius (r=30) to avoid destroying diagnostically relevant mid-frequency content.
 
+![Radial Power Spectrum Class Comparison](radial-ps_class-comparison.png)
+
 #### Maximum Intensity Projections
 - Visualized en-face projections to understand 3D structural differences.
 - Confirmed that the optic nerve head region contains the primary discriminative features.
+
+![Max Projection Profiles](max-projection-profiles_plot.png)
 
 #### Key EDA Conclusions
 - The dataset is well-suited for augmentation: high structural regularity means synthetic variants can be generated without risking anatomically implausible outputs.
@@ -71,6 +77,8 @@ The EDA phase focused specifically on understanding the dataset's characteristic
 ### 3.1 Augmentation Pipeline
 
 Five physics-informed augmentation strategies were applied to all 1,110 volumes:
+
+![Augmentation Pipeline](images/augmentation_pipeline.png)
 
 | # | Augmentation | Parameter | Clinical Rationale |
 |---|---|---|---|
@@ -158,6 +166,8 @@ Additionally, a hyperparameter grid search over learning rates was performed to 
 
 ### 5.1 Part 1 vs Part 2 Comparison
 
+![Part 1 vs Part 2 AUC Comparison](images/p1_vs_p2_comparison.png)
+
 | Configuration | Architecture | Training Data | AUC |
 |---|---|---|---|
 | Part 1 Baseline | Sequential | Original 888 | 0.88 |
@@ -226,6 +236,8 @@ For deployment as a clinical screening tool:
 ---
 
 ## 7. Conclusions
+
+![Complete Results Comparison](images/complete_results_comparison.png)
 
 1. **Physics-informed augmentation** (gamma, noise, LPF, fan distortion) is a principled approach to expanding OCT datasets, but did not improve classification AUC for this specific dataset and task. This confirms the original paper's finding.
 2. **Architectural improvements** (residual connections, attention mechanisms) provide more benefit than data augmentation when the base dataset has limited patient diversity.
