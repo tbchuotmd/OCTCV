@@ -1,19 +1,65 @@
 # OCTCV — Glaucoma Detection from 3D OCT Volumes
 
-## Overview
+> Deep learning for binary glaucoma classification using 3D Optical Coherence Tomography volume scans centered on the optic nerve head.
 
-This project applies deep learning to **binary glaucoma classification** using 3D Optical Coherence Tomography (OCT) volume scans centered on the optic nerve head (ONH). It is structured in two capstone parts:
+**Best Model: ResNet-Like | AUC = 0.94 | 114K params | 59s training**
 
-| | Part 1 (Capstone Two) | Part 2 (Capstone Three) |
-|---|---|---|
-| **Goal** | Establish baselines across 3 CNN architectures | Investigate physics-informed data augmentation |
-| **Training Data** | 1,110 original OCT volumes | 6,660 volumes (original + 5 augmentation types) |
-| **Best AUC** | 0.94 (ResNet-Like) | ~0.92 (Attention) |
-| **Key Finding** | Residual connections improve gradient flow | Augmentation does not universally help; architectural choice matters more |
+---
 
-The project reproduces and extends the approach from:
+## The Story
 
-> Maetschke, S. et al. (2019). *A feature agnostic approach for glaucoma detection in OCT volumes.* PLOS ONE, 14(7), e0219126.
+Glaucoma causes irreversible blindness in 80M+ people globally. Early detection matters, but distinguishing glaucomatous damage from normal anatomical variation on OCT scans is time-consuming for clinicians.
+
+This project asks: *Can a 3D CNN learn to classify glaucoma from raw OCT volumes without manual feature extraction?*
+
+**Part 1** reproduced the approach of [Maetschke et al. (2019)](https://doi.org/10.1371/journal.pone.0219126) and tested two additional architectures. The ResNet-Like model matched the paper's reported AUC of 0.94.
+
+**Part 2** asked whether physics-informed data augmentation (6x expansion) could push performance further. The answer: **no** — augmentation does not substitute for patient diversity.
+
+---
+
+## Results at a Glance
+
+| Architecture | Part 1 (888 vols) | Part 2 (5,328 vols) | Winner |
+|:---|:---:|:---:|:---:|
+| **Sequential** | 0.88 | 0.82–0.88 | Part 1 |
+| **ResNet-Like** | **0.94** | 0.87–0.92 | Part 1 |
+| **Attention** | 0.93 | 0.88–0.93 | Tie |
+
+The performance ceiling of ~0.94 AUC is limited by dataset diversity (624 patients, single scanner, single institution) — not by training set volume or model capacity.
+
+---
+
+## Architectures
+
+All models accept `(64, 128, 64, 1)` input — downsampled 3D ONH-centered OCT volumes.
+
+```
+Sequential:   5x (Conv3D -> BN -> ReLU) -> GAP -> Dense(1)
+              Kernels: 7-5-5-3-3, 32 filters, ~323K params
+
+ResNet-Like:  Conv3D stem -> 3x Residual Blocks -> GAP -> Dense(1)
+              Skip connections for gradient flow, ~114K params
+
+Attention:    ResNet + Squeeze-Excitation + Spatial Attention
+              Channel & spatial recalibration, ~130K params
+```
+
+---
+
+## Augmentation Pipeline (Part 2)
+
+Five physics-informed transforms simulate realistic OCT imaging variation:
+
+| Transform | Parameter | Simulates |
+|:---|:---:|:---|
+| Gamma Bright | γ = 1.67 | Over-exposed scan |
+| Gamma Dark | γ = 0.60 | Under-exposed scan |
+| Rayleigh Noise | scale = 0.67 | OCT speckle noise |
+| Low-Pass Filter | r = 30 | Defocus / reduced resolution |
+| Fan Distortion | pivot = 121 | Scan-head misalignment |
+
+**Result**: 1,110 volumes → 6,660 volumes (6x). Each transform targets a different axis of real-world imaging variability, yet none improved downstream classification.
 
 ---
 
@@ -23,46 +69,31 @@ The project reproduces and extends the approach from:
 OCTCV/
 ├── octcv/                          # Shared Python library
 │   ├── mdl_lib/
-│   │   ├── __init__.py             # XVolSet, train_model(), ModelEvaluator, utilities
+│   │   ├── __init__.py             # XVolSet, train_model(), ModelEvaluator
 │   │   ├── architectures.py        # buildSequential, buildResNet, buildAttnNN
-│   │   ├── augmentation.py         # Physics-informed augmentation transforms (Device A only†)
-│   │   └── callbacks.py            # LivePlot (intra-epoch), EpochProgressBar
-│   ├── imageTransforms/            # Image transform utilities
-│   ├── arrViz.py                   # Array/volume visualization utilities
+│   │   └── callbacks.py            # LivePlot, EpochProgressBar
+│   ├── arrViz.py                   # Volume visualization
 │   └── system_monitoring.py        # GPU/RAM monitoring
 │
-├── p1_Problem_Identification/      # Part 1: Problem definition
-├── p2_Data_Wrangling/              # Part 1: Data ingestion & cleaning
-├── p3_EDA/                         # Part 1: Exploratory data analysis
-├── p4_Preprocessing/               # Part 1: Preprocessing pipeline
-├── p5_Modeling/                     # Part 1: Model training & evaluation
-│   └── modeling.ipynb              # Part 1 modeling notebook (baseline results)
-├── p6_Report/                      # Part 1: Final report
-├── p7_Presentation/                # Part 1: Slide deck
+├── p1–p7/                          # Part 1: Problem → Modeling → Report
+│   └── p5_Modeling/modeling.ipynb   # Baseline training & evaluation
 │
-├── PART_2/                         # Part 2: Augmentation + Modeling extension
-│   ├── DW-EDA.ipynb                # Data wrangling & EDA (augmentation-focused)
-│   ├── pps-modeling.ipynb          # Preprocessing (Part I) + Modeling (Part II)
-│   ├── Capstone-Three_Final_Report.md
+├── PART_2/                         # Part 2: Augmentation study
+│   ├── DW-EDA.ipynb                # EDA: SSIM, power spectra, augmentation design
+│   ├── PPs-Modeling.ipynb          # Preprocessing + Modeling pipeline
+│   ├── model_metrics.json          # Full metrics & configuration
+│   ├── Capstone-Three_Final_Report.pdf
 │   └── Capstone-Three_Presentation.pptx
 │
-├── WebApp/                         # Gradio-based screening demo (WIP)
-├── datasrc/                        # Data directory (not tracked — see below)
-├── feature-agnostic-glaucoma-detection.pdf  # Reference paper
+├── datasrc/                        # Data (not tracked — see Setup)
+├── feature-agnostic-glaucoma-detection.pdf
 ├── requirements.txt
 └── README.md
 ```
 
 ---
 
-## Setup Instructions
-
-### Prerequisites
-
-- Python 3.12 (tested with 3.12.11)
-- CUDA-capable GPU recommended for training (tested on NVIDIA with TensorFlow GPU)
-
-### Installation
+## Setup
 
 ```bash
 git clone https://github.com/chuotmd/OCTCV.git
@@ -72,130 +103,52 @@ conda activate octcv
 pip install -r requirements.txt
 ```
 
-### Data
+**Data**: Download OCT volumes from [Zenodo](https://zenodo.org/records/1481223) (DOI: 10.5281/zenodo.1481223). Place `.npy` files in `datasrc/volumesOCT/`.
 
-The OCT volume dataset is not included in this repository due to size. Download from:
-
-**OCT volumes for glaucoma detection**
-- Source: [Zenodo](https://zenodo.org/records/1481223)
-- DOI: 10.5281/zenodo.1481223
-- Place extracted `.npy` files in `datasrc/volumesOCT/`
-
-Augmented volumes (generated by Part 2 preprocessing) are also too large for git and must be regenerated locally by running `PART_2/pps-modeling.ipynb` Part I cells.
-
-**†Device A-only files**: `octcv/mdl_lib/augmentation.py` contains the physics-informed augmentation transforms (gamma correction, Rayleigh noise injection, low-pass filtering, fan distortion). It exists on the GPU training machine but is not committed to git because it imports utility functions that were refactored. The augmentation logic is self-contained in the preprocessing section of `PART_2/pps-modeling.ipynb`.
+**GPU**: CUDA-capable GPU recommended. Tested on NVIDIA RTX 4070 Ti with TensorFlow 2.x.
 
 ---
 
-## Architectures
+## Training Configuration
 
-All models accept input shape `(64, 128, 64, 1)` — downsampled 3D OCT volumes.
-
-| Architecture | Description | Key Feature |
-|---|---|---|
-| **Sequential** | 5-layer CNN (7→5→3→3→3 kernels) | Direct reproduction of Maetschke et al. |
-| **ResNet-Like** | Sequential + residual skip connections | Stable gradient flow for deeper features |
-| **Attention** | ResNet + squeeze-excitation + spatial attention | Highlights diagnostically relevant regions |
-
----
-
-## Key Results
-
-### Part 1 — Original Dataset (1,110 volumes)
-
-| Architecture | Test AUC |
-|---|---|
-| Sequential | 0.88 |
-| ResNet-Like | **0.94** |
-| Attention | 0.93 |
-
-### Part 2 — Augmented Dataset (6,660 volumes)
-
-| Architecture | Test AUC | Notes |
-|---|---|---|
-| Sequential | ~0.91 | Improved over Part 1 baseline |
-| ResNet-Like | ~0.89 | Augmentation hurt this architecture |
-| Attention | ~0.92 | Best augmented result |
-
-**Conclusion**: The ResNet-Like model on original data remains the strongest single configuration. Augmentation provides marginal benefit for Sequential/Attention but degrades ResNet performance — consistent with the original paper's finding.
-
----
-
-## Notebooks (Execution Order)
-
-### Part 1
-
-1. `p2_Data_Wrangling/` → Data ingestion, cleaning, metadata CSV
-2. `p3_EDA/` → Exploratory analysis of OCT volume characteristics
-3. `p4_Preprocessing/` → Downsampling, normalization
-4. `p5_Modeling/modeling.ipynb` → Train/evaluate all 3 architectures
-
-### Part 2
-
-1. `PART_2/DW-EDA.ipynb` → SSIM analysis, radial power spectra, augmentation design
-2. `PART_2/pps-modeling.ipynb` → Part I: augmentation pipeline; Part II: training + ablation
-
----
-
-## The `octcv` Library
-
-The shared `octcv` package provides reusable utilities across both parts:
-
-```python
-from octcv.mdl_lib import XVolSet, train_model, ModelEvaluator
-from octcv.mdl_lib.architectures import buildSequential, buildResNet, buildAttnNN
-from octcv.mdl_lib.callbacks import LivePlot, EpochProgressBar
+```json
+{
+  "optimizer": "NAdam",
+  "learning_rate": 1e-4,
+  "loss": "binary_crossentropy",
+  "batch_size": 4,
+  "early_stopping": { "monitor": "val_auc", "patience": 5 },
+  "input_normalization": "uint8 / 255 → [0, 1]"
+}
 ```
 
-- **`XVolSet`**: Dataset class wrapping NumPy volume arrays with `to_tf_dataset()` for efficient batched loading.
-- **`train_model()`**: Standalone training function with configurable callbacks, normalization, and shuffling.
-- **`ModelEvaluator`**: Evaluation-only class for computing AUC, ROC curves, and classification reports.
-- **`LivePlot`**: Real-time training visualization with intra-epoch progress updates.
+---
+
+## Key Takeaways
+
+1. **Architecture > Data Volume** — ResNet's skip connections matter more than 6x more training data
+2. **Augmentation ≠ New Patients** — Synthetic variation doesn't add anatomical diversity
+3. **Small datasets can work** — 888 volumes is enough for 0.94 AUC with the right architecture
+4. **The paper reproduces** — Our ResNet-Like matches the original authors' reported 0.94
 
 ---
 
 ## Data Sources
 
-### Dataset 1 (Primary — used in both parts)
-
-| Field | Value |
-|---|---|
-| **Name** | OCT volumes for glaucoma detection |
-| **Contributors** | Ishikawa, Hiroshi |
-| **Affiliation** | New York University |
-| **Published** | November 9, 2018 |
-| **Source** | [Zenodo](https://zenodo.org/records/1481223) |
-| **DOI** | 10.5281/zenodo.1481223 |
-
-1,110 ONH-centered OCT volume scans (200×200×1024 voxels) from 624 patients. 847 glaucoma, 263 healthy.
-
-### Dataset 2 (Exploratory — Part 1 only)
-
-| Field | Value |
-|---|---|
-| **Name** | Composite Retinal Fundus and OCT Dataset |
-| **Contributors** | Hassan, T., Akram, M.U., Nazir, M.N. |
-| **Source** | [Mendeley](https://data.mendeley.com/datasets/trghs22fpg/4) |
-| **DOI** | 10.17632/trghs22fpg.4 |
-
-2D B-scan OCT images used for exploratory 2D classification in Part 1.
+| Dataset | Use | Source |
+|:---|:---|:---|
+| OCT Volumes (Ishikawa 2018) | Primary — both parts | [Zenodo](https://zenodo.org/records/1481223) |
+| Composite Fundus+OCT (Hassan 2021) | Exploratory — Part 1 | [Mendeley](https://data.mendeley.com/datasets/trghs22fpg/4) |
 
 ---
 
 ## References
 
-[1] Ishikawa, H. (2018). *OCT volumes for glaucoma detection* (Version 1.0.0) [Data set]. Zenodo. https://doi.org/10.5281/zenodo.1481223
-
-[2] Maetschke, S., Antony, B., Ishikawa, H., Wollstein, G., Schuman, J., & Garnavi, R. (2019). A feature agnostic approach for glaucoma detection in OCT volumes. *PLOS ONE*, 14(7), e0219126.
-
-[3] Hassan, T., Akram, M.U., & Nazir, M.N. (2021). *A Composite Retinal Fundus and OCT Dataset* (Version 4) [Data set]. Mendeley Data. https://doi.org/10.17632/trghs22fpg.4
-
-[4] He, K., Zhang, X., Ren, S., & Sun, J. (2016). Deep residual learning for image recognition. *CVPR*, 770–778.
-
-[5] Hu, J., Shen, L., & Sun, G. (2018). Squeeze-and-excitation networks. *CVPR*, 7132–7141.
+1. Maetschke, S. et al. (2019). A feature agnostic approach for glaucoma detection in OCT volumes. *PLOS ONE*, 14(7), e0219126.
+2. Ishikawa, H. (2018). OCT volumes for glaucoma detection. Zenodo. DOI: 10.5281/zenodo.1481223
+3. He, K. et al. (2016). Deep residual learning for image recognition. *CVPR*.
+4. Hu, J. et al. (2018). Squeeze-and-excitation networks. *CVPR*.
 
 ---
 
-## License
-
-This project is developed for academic/capstone purposes. The OCT dataset is publicly available under its original Zenodo license.
+*Academic capstone project. OCT dataset available under its original Zenodo license.*

@@ -1,88 +1,71 @@
 {
-  "project": "OCTCV Capstone Three - Physics-Informed Augmentation",
+  "project": "OCTCV Capstone Three — Physics-Informed Data Augmentation",
   "dataset": {
+    "source": "Zenodo (DOI: 10.5281/zenodo.1481223)",
     "total_volumes": 1110,
-    "augmented_volumes": 6660,
-    "train_augmented": 5328,
-    "validation": 111,
-    "evaluation": 111,
-    "class_distribution": {
-      "glaucoma": 847,
-      "normal": 263,
-      "ratio": "76% / 24%"
+    "patients": 624,
+    "scanner": "Cirrus SD-OCT (Zeiss)",
+    "volume_shape": [64, 128, 64, 1],
+    "classes": {
+      "glaucoma_POAG": 847,
+      "normal": 263
+    },
+    "splits": {
+      "train_original": 888,
+      "train_augmented": 5328,
+      "validation": 111,
+      "evaluation": 111
     }
   },
-  "augmentation_parameters": {
-    "gamma_bright": 1.67,
-    "gamma_dark": 0.6,
-    "rayleigh_noise_scale": 0.67,
-    "lpf_radius": 30,
-    "fan_pivot_distance": 121
+  "augmentation": {
+    "expansion_factor": 6,
+    "total_augmented": 6660,
+    "transforms": {
+      "gamma_bright": { "gamma": 1.67, "rationale": "Over-exposed scan simulation" },
+      "gamma_dark": { "gamma": 0.60, "rationale": "Under-exposed scan simulation" },
+      "rayleigh_noise": { "scale": 0.67, "rationale": "OCT speckle noise modeling" },
+      "low_pass_filter": { "radius": 30, "rationale": "Defocus / reduced axial resolution" },
+      "fan_distortion": { "pivot_distance": 121, "rationale": "Scan-head geometric misalignment" }
+    }
   },
-  "training_config": {
+  "training": {
     "optimizer": "NAdam",
-    "base_learning_rate": 1e-4,
+    "learning_rate": 1e-4,
+    "learning_rates_searched": [5e-5, 1e-4, 3e-4, 5e-4],
     "loss": "binary_crossentropy",
+    "metrics": ["accuracy", "AUC (ROC)"],
     "batch_size": 4,
     "max_epochs": 80,
-    "early_stopping_patience": 5,
-    "early_stopping_monitor": "val_auc",
-    "restore_best_weights": true,
-    "class_balancing": "none (unbalanced as-is)"
+    "early_stopping": {
+      "monitor": "val_auc",
+      "patience": 5,
+      "restore_best_weights": true
+    }
   },
   "results": {
-    "part1_baselines": {
-      "sequential": {
-        "auc": 0.88,
-        "epochs_trained": 11,
-        "training_data": "original_888"
-      },
-      "resnet_like": {
-        "auc": 0.94,
-        "epochs_trained": 15,
-        "training_data": "original_888"
-      },
-      "attention": {
-        "auc": 0.93,
-        "epochs_trained": 18,
-        "training_data": "original_888"
-      }
+    "part1_baselines_original_888": {
+      "sequential":  { "auc": 0.88, "epochs": 11, "time_sec": 114 },
+      "resnet_like": { "auc": 0.94, "epochs": 15, "time_sec": 59 },
+      "attention":   { "auc": 0.93, "epochs": 18, "time_sec": 74 }
     },
-    "part2_augmented": {
-      "sequential": {
-        "auc_range": [0.82, 0.88],
-        "training_data": "augmented_5328",
-        "note": "Consistently equal or below Part 1 baseline"
-      },
-      "resnet_like": {
-        "auc_range": [0.87, 0.92],
-        "training_data": "augmented_5328",
-        "note": "Below Part 1 baseline of 0.94"
-      },
-      "attention": {
-        "auc_range": [0.88, 0.93],
-        "training_data": "augmented_5328",
-        "note": "Approximately equal to Part 1"
-      }
-    },
-    "hyperparameter_tuning": {
-      "learning_rates_tested": [5e-5, 1e-4, 3e-4, 5e-4],
-      "best_lr": "varies by run (~1e-4 to 3e-4)",
-      "note": "Tuning did not overcome augmentation ceiling"
+    "part2_augmented_5328": {
+      "sequential":  { "auc_range": [0.82, 0.88], "note": "Equal or below Part 1" },
+      "resnet_like": { "auc_range": [0.87, 0.92], "note": "Below Part 1 baseline" },
+      "attention":   { "auc_range": [0.88, 0.93], "note": "Approximately equal to Part 1" }
     }
   },
   "final_model": {
-    "name": "ResNet-Like (Part 1)",
-    "architecture": "Conv3D stem + 3 residual blocks + GAP + Dense(sigmoid)",
-    "training_data": "Original 888 volumes (no augmentation)",
-    "best_auc": 0.94,
-    "rationale": "Augmentation did not improve any architecture; Part 1 ResNet-Like remains best"
+    "name": "ResNet-Like",
+    "source": "Part 1 (original 888 volumes, no augmentation)",
+    "test_auc": 0.94,
+    "parameters": 114177,
+    "layers": 29,
+    "architecture": "Conv3D(16,k5,s2) -> 3x ResidualBlock(16->32->32) -> GAP3D -> Dense(1,sigmoid)"
   },
-  "key_findings": [
-    "6x augmentation did NOT improve AUC for any architecture",
-    "Class balancing (downsampling) is harmful — confirmed from Part 1",
-    "Performance ceiling (~0.94) is dataset diversity limited, not volume limited",
-    "ResNet-Like architecture is consistently the best performer",
-    "Original paper's finding of augmentation hurting is reproduced"
+  "conclusions": [
+    "6x physics-informed augmentation did not improve AUC for any architecture",
+    "Performance ceiling (~0.94) is limited by dataset diversity (624 patients), not data volume",
+    "ResNet-Like architecture is consistently the best performer across all configurations",
+    "Result is consistent with the original paper's finding that augmentation reduced their AUC"
   ]
 }
