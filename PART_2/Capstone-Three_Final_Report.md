@@ -18,14 +18,14 @@ This project is a continuation of Capstone Two (Part 1), which trained 3D CNNs o
 
 ### Data Source
 
-| **Name**         | OCT volumes for glaucoma detection                                |
-| :--------------- | :---------------------------------------------------------------- |
-| **Contributors** | Ishikawa, Hiroshi                                                 |
-| **Affiliations** | New York University                                               |
-| **Version**      | 1.0.0                                                             |
-| **Published**    | November 9, 2018                                                  |
-| **Source**       | [Zenodo](https://zenodo.org/records/1481223)                      |
-| **DOI**          | 10.5281/zenodo.1481223                                            |
+| **Name**         | OCT volumes for glaucoma detection           |
+|:---------------- |:-------------------------------------------- |
+| **Contributors** | Ishikawa, Hiroshi                            |
+| **Affiliations** | New York University                          |
+| **Version**      | 1.0.0                                        |
+| **Published**    | November 9, 2018                             |
+| **Source**       | [Zenodo](https://zenodo.org/records/1481223) |
+| **DOI**          | 10.5281/zenodo.1481223                       |
 
 **Description**: 1,110 ONH-centered OCT volume scans (200×200×1024 voxels, downsampled to 64×128×64) from 624 patients. 847 scans diagnosed with primary open-angle glaucoma (POAG), 263 classified as healthy.
 
@@ -44,6 +44,7 @@ As this project uses the same dataset as Part 1, the data wrangling step was min
 The EDA phase focused specifically on understanding the dataset's characteristics to **inform augmentation design decisions**. Key analyses included:
 
 #### Structural Similarity (SSIM) Analysis
+
 - Computed pairwise SSIM between volumes within and across classes.
 - Found high intra-class similarity (SSIM > 0.8), confirming that OCT volumes from the same diagnostic class share substantial structural features.
 - The narrow SSIM distribution suggested conservative augmentation parameters would be appropriate to avoid pushing augmented volumes outside the natural data manifold.
@@ -51,6 +52,7 @@ The EDA phase focused specifically on understanding the dataset's characteristic
 ![SSIM Boxplot](ssim_boxplot.png)
 
 #### Radial Power Spectrum Analysis
+
 - Compared frequency-domain characteristics between Normal and Glaucoma classes.
 - Found that glaucomatous changes manifest primarily in mid-frequency spatial features (corresponding to retinal nerve fiber layer thinning), while low-frequency structure (overall scan geometry) and high-frequency content (speckle/noise) are similar across classes.
 - This informed the LPF augmentation radius (r=30) to avoid destroying diagnostically relevant mid-frequency content.
@@ -58,12 +60,14 @@ The EDA phase focused specifically on understanding the dataset's characteristic
 ![Radial Power Spectrum Class Comparison](radial-ps_class-comparison.png)
 
 #### Maximum Intensity Projections
+
 - Visualized en-face projections to understand 3D structural differences.
 - Confirmed that the optic nerve head region contains the primary discriminative features.
 
 ![Max Projection Profiles](max-projection-profiles_plot.png)
 
 #### Key EDA Conclusions
+
 - The dataset is well-suited for augmentation: high structural regularity means synthetic variants can be generated without risking anatomically implausible outputs.
 - The augmentation budget was set to 6× (5 augmentation types + originals), balancing dataset expansion against the risk of overfitting to augmentation artifacts.
 - Augmentation parameters were calibrated to produce SSIM values within the natural intra-class distribution.
@@ -80,32 +84,32 @@ Five physics-informed augmentation strategies were applied to all 1,110 volumes:
 
 ![Augmentation Pipeline](images/augmentation_pipeline.png)
 
-| # | Augmentation | Parameter | Clinical Rationale |
-|---|---|---|---|
-| 1 | **Gamma Bright** | γ = 1.67 | Over-exposed scan / high signal strength |
-| 2 | **Gamma Dark** | γ = 0.60 | Under-exposed scan / low signal strength |
-| 3 | **Rayleigh Noise** | scale = 0.67 | OCT speckle noise (coherent interference) |
-| 4 | **Low-Pass Filter** | radius = 30 | Defocus / reduced axial resolution |
-| 5 | **Fan Distortion** | pivot = 121 | Scan-head geometric misalignment |
+| #   | Augmentation        | Parameter    | Clinical Rationale                        |
+| --- | ------------------- | ------------ | ----------------------------------------- |
+| 1   | **Gamma Bright**    | γ = 1.67     | Over-exposed scan / high signal strength  |
+| 2   | **Gamma Dark**      | γ = 0.60     | Under-exposed scan / low signal strength  |
+| 3   | **Rayleigh Noise**  | scale = 0.67 | OCT speckle noise (coherent interference) |
+| 4   | **Low-Pass Filter** | radius = 30  | Defocus / reduced axial resolution        |
+| 5   | **Fan Distortion**  | pivot = 121  | Scan-head geometric misalignment          |
 
 ### 3.2 Implementation Details
 
-- All augmentations are implemented in `octcv/mdl_lib/augmentation.py`.
+- All augmentations are implemented in `octcv/mdl_lib/augmentation.py` 
 - Augmented volumes are saved to disk as individual `.npy` files for reproducibility and fast loading.
 - A unified metadata CSV (`augmented_metadata.csv`) catalogs all 6,660 entries with columns for file path, class label, patient ID, augmentation type, and laterality.
 - Class proportions are preserved (76% Glaucoma / 24% Normal in both original and each augmented subset).
 
 ### 3.3 Resulting Dataset
 
-| Subset | Count | Source |
-|--------|-------|--------|
-| Original | 1,110 | Raw OCT volumes |
-| Gamma Bright | 1,110 | γ = 1.67 transform |
-| Gamma Dark | 1,110 | γ = 0.60 transform |
-| Rayleigh Noise | 1,110 | Additive noise |
-| Low-Pass Filtered | 1,110 | Fourier-domain filtering |
-| Fan Distorted | 1,110 | Geometric warping |
-| **Total** | **6,660** | |
+| Subset            | Count     | Source                   |
+| ----------------- | --------- | ------------------------ |
+| Original          | 1,110     | Raw OCT volumes          |
+| Gamma Bright      | 1,110     | γ = 1.67 transform       |
+| Gamma Dark        | 1,110     | γ = 0.60 transform       |
+| Rayleigh Noise    | 1,110     | Additive noise           |
+| Low-Pass Filtered | 1,110     | Fourier-domain filtering |
+| Fan Distorted     | 1,110     | Geometric warping        |
+| **Total**         | **6,660** |                          |
 
 **Train/Test Split**: The test set consists exclusively of original (non-augmented) volumes to ensure evaluation reflects real-world scan conditions. Augmented volumes appear only in the training set.
 
@@ -120,32 +124,35 @@ Five physics-informed augmentation strategies were applied to all 1,110 volumes:
 Three 3D CNN architectures were compared, all built using the Keras Functional API:
 
 #### Model 1: Sequential CNN
+
 A 5-layer sequential architecture replicating Maetschke et al. (2019). Conv3D layers with filter sizes 7→5→3→3→3, each followed by BatchNormalization and ReLU. Global average pooling feeds into a dense sigmoid output.
 
 #### Model 2: ResNet-Like
+
 Builds upon the Sequential with **residual skip connections** between convolutional blocks. Each residual block adds the input back to the block's output, enabling gradient flow and allowing deeper feature extraction without degradation.
 
 #### Model 3: Attention Network
+
 Extends the ResNet-Like architecture with **squeeze-excitation** (channel attention) and **spatial attention** blocks. Channel attention recalibrates feature map importance; spatial attention highlights diagnostically relevant spatial regions.
 
 ### 4.2 Training Configuration
 
-| Parameter | Value |
-|---|---|
-| Optimizer | NAdam |
-| Learning Rate | Tuned via grid search (5e-5 to 5e-4) |
-| Batch Size | 4 |
-| Max Epochs | 80 |
-| Early Stopping | Patience = 5–8 (monitoring val AUC) |
-| Input Normalization | /255 to [0, 1] |
+| Parameter           | Value                                |
+| ------------------- | ------------------------------------ |
+| Optimizer           | NAdam                                |
+| Learning Rate       | Tuned via grid search (5e-5 to 5e-4) |
+| Batch Size          | 4                                    |
+| Max Epochs          | 80                                   |
+| Early Stopping      | Patience = 5–8 (monitoring val AUC)  |
+| Input Normalization | /255 to [0, 1]                       |
 
 ### 4.3 Experimental Configurations
 
 The core experiment of Part 2 is straightforward: train all three architectures on the augmented data and compare to Part 1 baselines.
 
-| Configuration | Architecture | Training Data |
-|---|---|---|
-| Part 1 Baseline | Sequential / ResNet / Attention | Original 888 |
+| Configuration    | Architecture                    | Training Data   |
+| ---------------- | ------------------------------- | --------------- |
+| Part 1 Baseline  | Sequential / ResNet / Attention | Original 888    |
 | Part 2 Augmented | Sequential / ResNet / Attention | Augmented 5,328 |
 
 Additionally, a hyperparameter grid search over learning rates was performed to ensure the augmented training regime had an optimized learning rate.
@@ -165,14 +172,14 @@ Additionally, a hyperparameter grid search over learning rates was performed to 
 
 ![Part 1 vs Part 2 AUC Comparison](images/p1_vs_p2_comparison.png)
 
-| Configuration | Architecture | Training Data | AUC |
-|---|---|---|---|
-| Part 1 Baseline | Sequential | Original 888 | 0.88 |
-| Part 1 Baseline | ResNet-Like | Original 888 | 0.94 |
-| Part 1 Baseline | Attention | Original 888 | 0.93 |
-| Part 2 Augmented | Sequential | Augmented 5,328 | ≤ 0.88 |
-| Part 2 Augmented | ResNet-Like | Augmented 5,328 | < 0.94 |
-| Part 2 Augmented | Attention | Augmented 5,328 | ~0.92 |
+| Configuration    | Architecture | Training Data   | AUC    |
+| ---------------- | ------------ | --------------- | ------ |
+| Part 1 Baseline  | Sequential   | Original 888    | 0.88   |
+| Part 1 Baseline  | ResNet-Like  | Original 888    | 0.94   |
+| Part 1 Baseline  | Attention    | Original 888    | 0.93   |
+| Part 2 Augmented | Sequential   | Augmented 5,328 | ≤ 0.88 |
+| Part 2 Augmented | ResNet-Like  | Augmented 5,328 | < 0.94 |
+| Part 2 Augmented | Attention    | Augmented 5,328 | ~0.92  |
 
 > **Note**: Part 2 AUC values depend on run; exact values are populated in the notebook. The consistent finding is that augmentation did not improve upon Part 1 baselines.
 
@@ -209,6 +216,7 @@ The central finding of this project—that 6× data augmentation did not improve
 ### 6.2 Architecture Insights
 
 The ResNet-Like model's consistent superiority suggests that:
+
 - The classification task benefits from deeper feature hierarchies (enabled by residual connections) beyond what a 5-layer sequential stack can capture.
 - The attention model's additional parameters may lead to overfitting on this small dataset, explaining its higher variance across configurations.
 - All three architectures converge within a narrow AUC band (roughly 0.85–0.95), suggesting a performance ceiling imposed by dataset size and diversity.
@@ -216,6 +224,7 @@ The ResNet-Like model's consistent superiority suggests that:
 ### 6.3 Practical Implications
 
 For deployment as a clinical screening tool:
+
 - The **ResNet-Like model trained on original data** offers the best performance-to-complexity ratio.
 - The model could serve as a triage system, flagging high-probability scans for ophthalmologist review.
 - Inference is fast (single forward pass through a relatively shallow 3D CNN), making it suitable for point-of-care deployment.
@@ -284,4 +293,6 @@ octcv/                              # Shared library code
 
 ---
 
-*Report generated as part of OCTCV Capstone Three. Full code and reproducible notebooks available in the repository.*
+*Report written as part of OCTCV Capstone Three. Full code and reproducible notebooks available in the repository.*
+
+
